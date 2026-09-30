@@ -102,28 +102,41 @@ function Install-BepInEx {
 }
 
 function Get-Lumen {
-    # A DLL sitting next to the installer wins, so an offline or manual copy works.
+    # The newest release wins, and the copy next to the installer is the fallback.
+    #
+    # This used to be the other way round. The zip ships with a Lumen.dll inside it, so the
+    # bundled copy always won and the download was dead code: anyone still holding an older
+    # zip installed that older version and had no way of knowing. Someone installing a
+    # months-old zip would hit bugs that were fixed long ago and report them as new.
+    #
+    # The local copy still matters. It is what makes the installer work with no internet,
+    # on a locked-down network, or if GitHub is having a bad day.
     $local = Join-Path $PSScriptRoot 'Lumen.dll'
-    if (Test-Path $local) {
-        Write-Ok 'Using the Lumen.dll next to this installer.'
-        return $local
+
+    Write-Step 'Checking for the latest Lumen...'
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $release = Invoke-RestMethod -Uri $ReleaseApi -UseBasicParsing -Headers @{
+            'User-Agent' = 'Lumen-Installer'
+        }
+
+        $asset = $release.assets | Where-Object { $_.name -eq 'Lumen.dll' } | Select-Object -First 1
+        if (-not $asset) { throw 'That release has no Lumen.dll attached.' }
+
+        $target = Join-Path $env:TEMP 'Lumen.dll'
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $target -UseBasicParsing
+
+        return [pscustomobject]@{ Path = $target; Version = $release.tag_name }
     }
+    catch {
+        if (-not (Test-Path $local)) { throw }
 
-    Write-Step 'Downloading the latest Lumen...'
+        Write-Warn "Could not reach GitHub ($($_.Exception.Message))."
+        Write-Warn 'Using the copy that came with this installer instead.'
 
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $release = Invoke-RestMethod -Uri $ReleaseApi -UseBasicParsing -Headers @{
-        'User-Agent' = 'Lumen-Installer'
+        return [pscustomobject]@{ Path = $local; Version = 'bundled copy' }
     }
-
-    $asset = $release.assets | Where-Object { $_.name -eq 'Lumen.dll' } | Select-Object -First 1
-    if (-not $asset) { throw 'That release has no Lumen.dll attached.' }
-
-    $target = Join-Path $env:TEMP 'Lumen.dll'
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $target -UseBasicParsing
-
-    Write-Ok "Downloaded Lumen $($release.tag_name)."
-    return $target
 }
 
 function Do-Install {
@@ -132,13 +145,15 @@ function Do-Install {
     Assert-GameClosed
     Install-BepInEx -Game $Game
 
-    $source = Get-Lumen
+    $lumen = Get-Lumen
     $folder = Join-Path $Game 'BepInEx\plugins\Lumen'
 
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
-    Copy-Item -Path $source -Destination (Join-Path $folder 'Lumen.dll') -Force
+    Copy-Item -Path $lumen.Path -Destination (Join-Path $folder 'Lumen.dll') -Force
 
-    Write-Ok 'Lumen installed.'
+    # Named outright so a support report says which version was installed, rather than
+    # leaving it to be guessed from when the zip was downloaded.
+    Write-Ok "Lumen $($lumen.Version) installed."
     Write-Host ''
     Write-Host '  Done. Start the game and press F10 for settings.' -ForegroundColor White
 }
