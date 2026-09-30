@@ -35,7 +35,7 @@ signed installer. The script is plain text and you can read every line of it
 [here](installer/install.ps1) before running it.
 
 <details>
-<summary>Installing by hand instead</summary>
+<summary>Installing by Hand Instead</summary>
 
 1. Install [BepInEx 6 (IL2CPP, win-x64)](https://builds.bepinex.dev/projects/bepinex_be)
    into your Nivalis Nights folder.
@@ -44,7 +44,7 @@ signed installer. The script is plain text and you can read every line of it
 
 </details>
 
-### Using it
+### Using It
 
 Press **F10** in game.
 
@@ -58,7 +58,7 @@ Changes apply straight away and save themselves. The panel never takes over your
 
 ### Settings
 
-| Setting | Default | What it does |
+| Setting | Default | What It Does |
 |---|---|---|
 | Crowd Performance | On | Master switch for everything below |
 | Remove Duplicate Characters | On | Free frames, no visible change |
@@ -70,7 +70,7 @@ Changes apply straight away and save themselves. The panel never takes over your
 **Hide Faraway Crowds** is the only setting that changes how the game looks. Lower distances
 give more frames and more noticeable fade-in. Pick the point where you stop noticing.
 
-### How much does it help?
+### How Much Does It Help?
 
 It depends entirely on your machine and where you are standing. The gain is largest in
 crowded streets and close to nothing in a quiet room or indoors, because it works by
@@ -79,7 +79,7 @@ removing per-character work.
 It also only helps if your processor is the thing holding you back, which is common in busy
 areas of this game. If your graphics card is the limit instead, expect very little.
 
-### Something looks wrong?
+### Something Looks Wrong?
 
 Turn **Crowd Performance** off in the panel. Everything returns to normal immediately,
 without a restart.
