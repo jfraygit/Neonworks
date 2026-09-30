@@ -32,7 +32,7 @@ right place. There is an **Uninstall Lumen** in the same folder if you change yo
 
 If Windows warns you about the file, that is because it is an unsigned script rather than a
 signed installer. The script is plain text and you can read every line of it
-[here](installer/install.ps1) before running it.
+[here](Installer/install.ps1) before running it.
 
 <details>
 <summary>Installing by Hand Instead</summary>
