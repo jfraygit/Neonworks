@@ -69,12 +69,23 @@ namespace Lumen.Tuning
                         if (!int.TryParse(name.Substring(marker + LodMarker.Length), out int level))
                             continue;
 
+                        // Only renderers that are currently drawing are candidates.
+                        //
+                        // This is load bearing. Where the game's own LODGroup is working it
+                        // has already chosen a level, and that choice is not always level 0
+                        // - a distant character may legitimately be showing LOD_002. Taking
+                        // the lowest-numbered renderer regardless of its state would hide
+                        // the visible one and keep one that was already off.
+                        //
+                        // Considering only enabled renderers makes this safe by construction:
+                        // a group can go from several drawing to exactly one, never to none.
+                        if (!renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
+
                         int id = renderer.GetInstanceID();
 
                         if (pass == 0)
                         {
-                            // Lowest level number is the highest detail, and that is the
-                            // one kept.
+                            // Among the ones actually drawing, keep the most detailed.
                             if (!BestLevel.TryGetValue(group, out int current) || level < current)
                             {
                                 BestLevel[group] = level;
