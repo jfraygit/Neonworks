@@ -45,6 +45,7 @@ namespace Lumen.Tuning
         // Last applied option values, so a change can be noticed and acted on.
         private bool _optionsKnown;
         private bool _dropShadows;
+        private bool _nameLookupWarningLogged;
 
         /// <summary>True while any renderer is overridden and owes a restore.</summary>
         private bool HasOverrides => _state.Count > 0 || _hidden.Count > 0;
@@ -90,8 +91,9 @@ namespace Lumen.Tuning
             if (_sinceRefresh >= RefreshInterval)
             {
                 _sinceRefresh = 0f;
+                // Keep our place: at low FPS a refresh can arrive before a full pass.
+                // Restarting here would leave the same tail of the list unvisited.
                 CharacterRegistry.CopyInto(_characters);
-                _cursor = 0;
             }
 
             if (_characters.Count == 0) return;
@@ -105,8 +107,8 @@ namespace Lumen.Tuning
             float farSq = cullDistance * cullDistance;
             float nearSq = cullDistance * Hysteresis * cullDistance * Hysteresis;
 
-            // An eighth of the crowd per frame: the full set is re-evaluated in about
-            // 130ms, and no single frame pays for all of it.
+            // About an eighth of the crowd per frame: a full pass takes eight to nine
+            // frames for larger crowds, and no single frame pays for all of it.
             int slice = Math.Max(8, _characters.Count / 8);
 
             for (int n = 0; n < slice; n++)
@@ -130,6 +132,12 @@ namespace Lumen.Tuning
                     else
                         wanted = distanceSq > farSq ? State.Culled : State.Cleaned;
 
+                    // Recheck each visit: names, dialogue and work shifts can change while
+                    // a character is culled. Cleaned still allows the shadow-only cleanup.
+                    if (wanted == State.Culled && LumenConfig.ProtectNamedNpcs.Value &&
+                        ShouldProtectName(character))
+                        wanted = State.Cleaned;
+
                     if (wanted != current) ApplyState(character, id, current, wanted);
                 }
                 catch (Exception)
@@ -140,6 +148,39 @@ namespace Lumen.Tuning
                     if (index < _characters.Count) _characters.RemoveAt(index);
                     _cursor = index;
                 }
+            }
+        }
+
+        private bool ShouldProtectName(BaseCharacter character)
+        {
+            try
+            {
+                var npc = character.TryCast<Character>();
+                if (npc == null) return true;
+
+                var display = npc.NameDisplay;
+                if (display == null) return true;
+
+                // ShouldDisplayName() suppresses a regular name during random dialogue.
+                // Keep story/work names protected through that temporary UI change, and
+                // keep speaking characters visible too. This is not a Real/Fake test.
+                return display.hasStory || display.randomDialogue || display.IsWorking();
+            }
+            catch (Exception ex)
+            {
+                if (!_nameLookupWarningLogged)
+                {
+                    _nameLookupWarningLogged = true;
+                    try
+                    {
+                        LumenPlugin.Log.LogWarning(
+                            $"Could not check an NPC name; keeping it visible: {ex.Message}");
+                    }
+                    catch (Exception) { /* Logging must not defeat the protection. */ }
+                }
+
+                // An unreadable label is not proof that this is a nameless crowd NPC.
+                return true;
             }
         }
 
