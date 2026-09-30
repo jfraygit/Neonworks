@@ -1,0 +1,79 @@
+# Neonworks
+
+Mods for **Nivalis Nights**.
+
+## Lumen
+
+A performance mod. It targets the biggest cost in a busy street and leaves the way the game
+looks alone.
+
+The game's graphics menu offers texture quality, shadow quality, shadow distance and LOD
+bias. Lumen changes none of those. Instead it removes work the game is doing that never
+reaches the screen:
+
+- **Duplicate character meshes.** Every NPC renders all five of its detail levels at the
+  same time - the same body drawn five times over, stacked in the same place. Lumen keeps
+  the most detailed one and switches off the copies underneath.
+- **Unused shadow meshes.** Each character carries extra hidden meshes whose only job is to
+  cast a shadow the lighting never shows, day or night.
+
+Both are on by default and neither changes what you see.
+
+There is also an optional setting to hide distant crowds, which does change what you see and
+is switched off unless you turn it on.
+
+### Install
+
+1. Install [BepInEx 6 (IL2CPP)](https://builds.bepinex.dev/projects/bepinex_be) into your
+   Nivalis Nights folder and run the game once so it sets itself up.
+2. Download `Lumen.dll` from [Releases](../../releases).
+3. Put it in `Nivalis Nights\BepInEx\plugins\Lumen\`.
+
+### Using it
+
+Press **F10** in game.
+
+| Key | Does |
+|---|---|
+| `F10` | Open and close the panel |
+| Up / Down | Move between settings |
+| Left / Right | Change the selected setting |
+
+Changes apply straight away and save themselves. The panel never takes over your mouse.
+
+### Settings
+
+| Setting | Default | What it does |
+|---|---|---|
+| Crowd Performance | On | Master switch for everything below |
+| Remove Duplicate Characters | On | Free frames, no visible change |
+| Skip Unused Shadow Work | On | Free frames, no visible change |
+| Hide Faraway Crowds | Off | More frames, but distant people fade in as you approach |
+| Borderless Window | On | Alt-tab without the screen flickering |
+| Colour Theme | Synthwave | Six schemes for the panel |
+
+**Hide Faraway Crowds** is the only setting that changes how the game looks. Lower distances
+give more frames and more noticeable fade-in. Pick the point where you stop noticing.
+
+### How much does it help?
+
+It depends entirely on your machine and where you are standing. The gain is largest in
+crowded streets and close to nothing in a quiet room or indoors, because it works by
+removing per-character work.
+
+It also only helps if your processor is the thing holding you back, which is common in busy
+areas of this game. If your graphics card is the limit instead, expect very little.
+
+### Something looks wrong?
+
+Turn **Crowd Performance** off in the panel. Everything returns to normal immediately,
+without a restart.
+
+If a problem persists, please open an [issue](../../issues) with your
+`BepInEx\LogOutput.log` attached.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
+
+Not affiliated with ION LANDS or 505 Games.

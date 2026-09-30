@@ -1,0 +1,19 @@
+<Project>
+
+  <!--
+    Shared paths. Override NivalisDir on the command line if the game lives elsewhere:
+      dotnet build /p:NivalisDir="D:\Games\Nivalis Nights"
+  -->
+  <PropertyGroup>
+    <NivalisDir Condition="'$(NivalisDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Nivalis Nights</NivalisDir>
+    <BepInExDir>$(NivalisDir)\BepInEx</BepInExDir>
+    <BepInExCore>$(BepInExDir)\core</BepInExCore>
+    <BepInExInterop>$(BepInExDir)\interop</BepInExInterop>
+
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LumenVersion>0.1.0</LumenVersion>
+  </PropertyGroup>
+
+</Project>
