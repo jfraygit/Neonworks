@@ -79,6 +79,11 @@ removing per-character work.
 It also only helps if your processor is the thing holding you back, which is common in busy
 areas of this game. If your graphics card is the limit instead, expect very little.
 
+**Remove Duplicate Characters depends on your graphics preset.** On Very High the game draws
+every character several times over and there is a lot to remove. On lower presets it often
+draws them correctly already, so there is nothing to cut and this setting does very little.
+That is expected rather than a fault — Lumen will not touch anything it is not sure about.
+
 ### Something Looks Wrong?
 
 Turn **Crowd Performance** off in the panel. Everything returns to normal immediately,
