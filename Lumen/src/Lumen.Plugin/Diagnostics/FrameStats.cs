@@ -4,7 +4,7 @@ namespace Lumen.Diagnostics
 {
     /// <summary>
     /// Rolling frame-time statistics. The 1% low is the number that actually reflects
-    /// "struggling badly" — an average of 60 with a 1% low of 22 feels worse than a flat 50.
+    /// "struggling badly". An average of 60 with a 1% low of 22 feels worse than a flat 50.
     /// </summary>
     internal sealed class FrameStats
     {

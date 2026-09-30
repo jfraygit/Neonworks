@@ -4,6 +4,8 @@ Mods for **Nivalis Nights**.
 
 ## Lumen
 
+![Lumen](docs/lumen.png)
+
 A performance mod. It removes work the game is doing that never reaches the screen, and
 leaves the way the game looks alone.
 
@@ -11,7 +13,7 @@ The game's graphics menu offers texture quality, shadow quality, shadow distance
 bias. Lumen changes none of those. What it does instead:
 
 - **Skips unused shadow work.** Every character carries extra hidden meshes whose only job
-  is to cast a shadow, and in this game that shadow never actually shows — not even in
+  is to cast a shadow, and in this game that shadow never actually shows, not even in
   daylight. Those meshes are skinned every frame for nothing.
 
 That one is on by default and changes nothing you can see.

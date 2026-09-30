@@ -14,7 +14,7 @@ namespace Lumen
     /// </para>
     /// <para>
     /// <c>GetAsyncKeyState</c> sidesteps both problems. It ignores window focus, so every
-    /// read is gated on <see cref="UnityEngine.Application.isFocused"/> — otherwise typing
+    /// read is gated on <see cref="UnityEngine.Application.isFocused"/>, otherwise typing
     /// in another window would drive the overlay.
     /// </para>
     /// </summary>
