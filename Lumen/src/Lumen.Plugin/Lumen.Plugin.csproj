@@ -46,11 +46,17 @@
     <Reference Include="UnityEngine.AIModule"><HintPath>$(BepInExInterop)\UnityEngine.AIModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 
-  <!-- Drop the built plugin straight into the game so a build is immediately testable. -->
+  <!--
+    Drop the built plugin straight into the game so a build is immediately testable.
+
+    Deliberately NOT ContinueOnError. The game locks the DLL while it is running, and a
+    copy that fails quietly leaves a stale plugin behind while the build still reports
+    success - which means testing the previous version without knowing it.
+  -->
   <Target Name="InstallToGame" AfterTargets="Build" Condition="Exists('$(BepInExDir)')">
     <MakeDir Directories="$(BepInExDir)\plugins\Lumen" />
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BepInExDir)\plugins\Lumen" ContinueOnError="true" />
-    <Message Importance="high" Text="Lumen installed to $(BepInExDir)\plugins\Lumen" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(BepInExDir)\plugins\Lumen" />
+    <Message Importance="high" Text="Lumen $(LumenVersion) installed to $(BepInExDir)\plugins\Lumen" />
   </Target>
 
 </Project>
