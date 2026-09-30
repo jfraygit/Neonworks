@@ -6,101 +6,51 @@ using UnityEngine;
 namespace Lumen.Tuning
 {
     /// <summary>
-    /// Works out which of a character's renderers are redundant. Shared by the optimizer
-    /// and the measurement probes so both agree on what can be removed.
+    /// Works out which of a character's renderers can be switched off without changing what
+    /// the character looks like. Shared by the optimizer and the measurement probes so both
+    /// agree on what is removable.
     /// </summary>
+    /// <remarks>
+    /// This used to also collapse each part's LOD levels down to the most detailed one, on
+    /// the belief that characters were drawing all five at once. That was a misreading: a
+    /// LODGroup leaves every level's <c>enabled</c> flag true and picks one to draw per
+    /// frame, so several enabled LOD renderers is not several being drawn. Switching off the
+    /// level the LODGroup had chosen simply made characters vanish, and on this game every
+    /// character LOD renderer is LODGroup-managed, so there was nothing to win either.
+    /// </remarks>
     internal static class CharacterRenderers
     {
-        private const string LodMarker = "_LOD_";
         private const string ShadowSuffix = "_Shadow";
 
-        // Scratch, reused across calls: this runs on a slice of the crowd every frame.
-        private static readonly Dictionary<string, int> BestLevel = new Dictionary<string, int>();
-        private static readonly Dictionary<string, int> BestId = new Dictionary<string, int>();
-
         /// <summary>
-        /// Fills <paramref name="into"/> with the instance IDs of renderers that can be
-        /// switched off without changing what the character looks like.
+        /// Fills <paramref name="into"/> with the instance IDs of removable renderers.
         /// </summary>
-        /// <param name="collapseLods">
-        /// Drop every LOD level but the most detailed one. Characters enable all five
-        /// levels at once: the same mesh drawn five times, each uploading a full set of
-        /// bone matrices.
-        /// </param>
         /// <param name="dropShadowProxies">
-        /// Drop the dedicated <c>*_Shadow</c> meshes. NPCs cast no visible shadow with
-        /// these enabled, at any time of day.
+        /// Drop the dedicated <c>*_Shadow</c> meshes. These are separate skinned meshes whose
+        /// only job is to cast a shadow, and NPCs show no shadow with them enabled at any
+        /// time of day. They are not LOD levels, so nothing else is managing them.
         /// </param>
         internal static void FindRedundant(Il2CppArrayBase<Renderer> renderers, HashSet<int> into,
-            bool collapseLods, bool dropShadowProxies)
+            bool dropShadowProxies)
         {
             into.Clear();
-            if (renderers == null) return;
+            if (renderers == null || !dropShadowProxies) return;
 
-            BestLevel.Clear();
-            BestId.Clear();
-
-            // Two passes: the first finds the surviving level for each LOD group, the second
-            // marks everything else. One pass cannot work - the winner may appear last.
-            for (int pass = 0; pass < 2; pass++)
+            for (int i = 0; i < renderers.Length; i++)
             {
-                for (int i = 0; i < renderers.Length; i++)
+                var renderer = renderers[i];
+                if (renderer == null) continue;
+
+                try
                 {
-                    var renderer = renderers[i];
-                    if (renderer == null) continue;
+                    if (!renderer.name.EndsWith(ShadowSuffix, StringComparison.OrdinalIgnoreCase))
+                        continue;
 
-                    try
-                    {
-                        string name = renderer.name;
-
-                        if (pass == 1 && dropShadowProxies &&
-                            name.EndsWith(ShadowSuffix, StringComparison.OrdinalIgnoreCase))
-                        {
-                            into.Add(renderer.GetInstanceID());
-                            continue;
-                        }
-
-                        if (!collapseLods) continue;
-
-                        int marker = name.LastIndexOf(LodMarker, StringComparison.OrdinalIgnoreCase);
-                        if (marker < 0) continue;
-
-                        string group = name.Substring(0, marker).ToLowerInvariant();
-                        if (!int.TryParse(name.Substring(marker + LodMarker.Length), out int level))
-                            continue;
-
-                        // Only renderers that are currently drawing are candidates.
-                        //
-                        // This is load bearing. Where the game's own LODGroup is working it
-                        // has already chosen a level, and that choice is not always level 0
-                        // - a distant character may legitimately be showing LOD_002. Taking
-                        // the lowest-numbered renderer regardless of its state would hide
-                        // the visible one and keep one that was already off.
-                        //
-                        // Considering only enabled renderers makes this safe by construction:
-                        // a group can go from several drawing to exactly one, never to none.
-                        if (!renderer.enabled || !renderer.gameObject.activeInHierarchy) continue;
-
-                        int id = renderer.GetInstanceID();
-
-                        if (pass == 0)
-                        {
-                            // Among the ones actually drawing, keep the most detailed.
-                            if (!BestLevel.TryGetValue(group, out int current) || level < current)
-                            {
-                                BestLevel[group] = level;
-                                BestId[group] = id;
-                            }
-                        }
-                        else if (BestId.TryGetValue(group, out int keepId) && id != keepId)
-                        {
-                            into.Add(id);
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        // An odd name or a renderer that went away; leave it alone.
-                    }
+                    into.Add(renderer.GetInstanceID());
+                }
+                catch (Exception)
+                {
+                    // A renderer that went away mid-walk; leave it alone.
                 }
             }
         }

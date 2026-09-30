@@ -44,6 +44,7 @@ namespace Lumen.Diagnostics
         private Sprite _rounded, _outline, _pill, _solid;
         private bool _built;
         private string _appliedTheme;
+        private string _lastFps;
 
         private sealed class RowWidgets
         {
@@ -58,6 +59,11 @@ namespace Lumen.Diagnostics
             internal Image TrackFill;
             internal Image Knob;
             internal TextMeshProUGUI TrackValue;
+
+            // Last values written, so nothing is assigned that has not changed.
+            internal string LastNote, LastValue;
+            internal int LastSelected = -1;
+            internal float LastFraction = -2f;
         }
 
         internal bool Available => _built;
@@ -170,7 +176,7 @@ namespace Lumen.Diagnostics
                 "LUMEN", 20f, FontStyles.Bold, Color.white, TextAlignmentOptions.Left);
             _wordmark.characterSpacing = 10f;
 
-            _version = Label(_panel, "Version", new Vector2(PadX + 104f, -12f), new Vector2(120f, 26f),
+            _version = Label(_panel, "Version", new Vector2(PadX + 104f, -12f), new Vector2(260f, 26f),
                 "v" + LumenPlugin.Version, 11f, FontStyles.Normal, Color.white, TextAlignmentOptions.Left);
 
             // Frame rate high in the header, detail line below it, rule clear of both.
@@ -285,7 +291,8 @@ namespace Lumen.Diagnostics
                 float ms = harness.Stats.AverageMs(2f);
                 float fps = FrameStats.ToFps(ms);
 
-                _fps.text = fps.ToString("0");
+                string fpsText = fps.ToString("0");
+                if (_lastFps != fpsText) { _fps.text = fpsText; _lastFps = fpsText; }
                 _fps.color = fps >= 60f ? theme.Good : fps >= 45f ? theme.Warning : theme.Bad;
                 _stats.text = $"{ms:0.0} ms      1% low {harness.Stats.OnePercentLowFps(10f):0}";
 
@@ -313,10 +320,25 @@ namespace Lumen.Diagnostics
             _footerRule.color = new Color(theme.Accent.r, theme.Accent.g, theme.Accent.b, 0.16f);
 
             _wordmark.color = theme.Ink;
-            _version.color = new Color(theme.Secondary.r, theme.Secondary.g, theme.Secondary.b, 0.9f);
+            // An available update takes over the version tag and the footer rather than
+            // adding a banner, so the panel never changes height and never covers more of
+            // the game than the player asked it to.
+            bool update = UpdateCheck.NewerVersion != null;
+
+            _version.text = update
+                ? $"v{LumenPlugin.Version}  UPDATE v{UpdateCheck.NewerVersion}"
+                : "v" + LumenPlugin.Version;
+
+            _version.color = update
+                ? theme.Warning
+                : new Color(theme.Secondary.r, theme.Secondary.g, theme.Secondary.b, 0.9f);
+
+            _footer.text = update
+                ? "Update at " + UpdateCheck.ReleasesUrl
+                : "UP/DOWN  Select     LEFT/RIGHT  Change     F10  Close";
             _fpsUnit.color = theme.InkFaint;
             _stats.color = theme.InkFaint;
-            _footer.color = theme.InkFaint;
+            _footer.color = update ? theme.Warning : theme.InkFaint;
 
             for (int i = 0; i < _sectionLabels.Count; i++)
                 _sectionLabels[i].color = new Color(theme.Secondary.r, theme.Secondary.g, theme.Secondary.b, 0.92f);
@@ -334,15 +356,28 @@ namespace Lumen.Diagnostics
 
         private void RefreshRow(Theme theme, SettingRow row, RowWidgets widgets, bool selected)
         {
-            widgets.Highlight.color = selected
-                ? new Color(theme.Accent.r, theme.Accent.g, theme.Accent.b, 0.10f)
-                : Color.clear;
+            int selectedFlag = selected ? 1 : 0;
+            if (widgets.LastSelected != selectedFlag)
+            {
+                widgets.Highlight.color = selected
+                    ? new Color(theme.Accent.r, theme.Accent.g, theme.Accent.b, 0.10f)
+                    : Color.clear;
 
-            widgets.Label.color = selected ? theme.Ink : theme.InkDim;
+                widgets.Label.color = selected ? theme.Ink : theme.InkDim;
+                widgets.LastSelected = selectedFlag;
+            }
 
             var tint = row.Visible ? theme.Warning : theme.Accent;
 
-            widgets.Note.text = row.Note;
+            // Assigning TextMeshPro's text forces a mesh rebuild even when the string is
+            // identical, and doing that for every row every frame made the labels flicker
+            // while the selection moved.
+            if (widgets.LastNote != row.Note)
+            {
+                widgets.Note.text = row.Note;
+                widgets.LastNote = row.Note;
+            }
+
             widgets.Note.color = row.Visible
                 ? new Color(theme.Warning.r, theme.Warning.g, theme.Warning.b, 0.80f)
                 : theme.InkFaint;
@@ -350,7 +385,13 @@ namespace Lumen.Diagnostics
             if (widgets.PillText != null)
             {
                 bool on = row.IsOn;
-                widgets.PillText.text = row.Value;
+
+                if (widgets.LastValue != row.Value)
+                {
+                    widgets.PillText.text = row.Value;
+                    widgets.LastValue = row.Value;
+                }
+
                 widgets.PillText.color = on ? theme.Accent : theme.InkFaint;
                 widgets.PillBackground.color = on
                     ? new Color(theme.Accent.r, theme.Accent.g, theme.Accent.b, 0.18f)
@@ -359,7 +400,12 @@ namespace Lumen.Diagnostics
 
             if (widgets.TrackValue == null) return;
 
-            widgets.TrackValue.text = row.Value;
+            if (widgets.LastValue != row.Value)
+            {
+                widgets.TrackValue.text = row.Value;
+                widgets.LastValue = row.Value;
+            }
+
             widgets.TrackValue.color = tint;
 
             if (widgets.TrackFill == null) return;
@@ -368,8 +414,13 @@ namespace Lumen.Diagnostics
 
             widgets.TrackFill.color = tint;
             widgets.Knob.color = tint;
-            widgets.TrackFill.rectTransform.sizeDelta = new Vector2(80f * fraction, 4f);
-            widgets.Knob.rectTransform.anchoredPosition = new Vector2(80f * fraction - 2.5f, 3f);
+
+            if (widgets.LastFraction != fraction)
+            {
+                widgets.TrackFill.rectTransform.sizeDelta = new Vector2(80f * fraction, 4f);
+                widgets.Knob.rectTransform.anchoredPosition = new Vector2(80f * fraction - 2.5f, 3f);
+                widgets.LastFraction = fraction;
+            }
         }
 
         internal void Destroy()

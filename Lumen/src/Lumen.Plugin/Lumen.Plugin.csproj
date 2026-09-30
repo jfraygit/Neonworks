@@ -46,6 +46,33 @@
     <Reference Include="UnityEngine.AIModule"><HintPath>$(BepInExInterop)\UnityEngine.AIModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 
+
+  <!--
+    Generate the version constant from LumenVersion so there is one source of truth.
+    It used to be a hand-edited const in LumenPlugin.cs, which silently drifted: the
+    panel reported 0.1.0 while 0.1.2 was running, and that panel reading was being used
+    to confirm which build was loaded.
+  -->
+  <Target Name="GenerateVersionConstant" BeforeTargets="BeforeCompile">
+    <PropertyGroup>
+      <VersionConstantPath>$(IntermediateOutputPath)LumenVersion.g.cs</VersionConstantPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <VersionConstantLines Include="namespace Lumen" />
+      <VersionConstantLines Include="{" />
+      <VersionConstantLines Include="    internal static class Build" />
+      <VersionConstantLines Include="    {" />
+      <VersionConstantLines Include="        internal const string Version = &quot;$(LumenVersion)&quot;%3B" />
+      <VersionConstantLines Include="    }" />
+      <VersionConstantLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(VersionConstantPath)" Lines="@(VersionConstantLines)"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(VersionConstantPath)" />
+    </ItemGroup>
+  </Target>
+
   <!--
     Drop the built plugin straight into the game so a build is immediately testable.
 

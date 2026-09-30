@@ -4,23 +4,20 @@ Mods for **Nivalis Nights**.
 
 ## Lumen
 
-A performance mod. It targets the biggest cost in a busy street and leaves the way the game
-looks alone.
+A performance mod. It removes work the game is doing that never reaches the screen, and
+leaves the way the game looks alone.
 
 The game's graphics menu offers texture quality, shadow quality, shadow distance and LOD
-bias. Lumen changes none of those. Instead it removes work the game is doing that never
-reaches the screen:
+bias. Lumen changes none of those. What it does instead:
 
-- **Duplicate character meshes.** Every NPC renders all five of its detail levels at the
-  same time - the same body drawn five times over, stacked in the same place. Lumen keeps
-  the most detailed one and switches off the copies underneath.
-- **Unused shadow meshes.** Each character carries extra hidden meshes whose only job is to
-  cast a shadow the lighting never shows, day or night.
+- **Skips unused shadow work.** Every character carries extra hidden meshes whose only job
+  is to cast a shadow, and in this game that shadow never actually shows — not even in
+  daylight. Those meshes are skinned every frame for nothing.
 
-Both are on by default and neither changes what you see.
+That one is on by default and changes nothing you can see.
 
-There is also an optional setting to hide distant crowds, which does change what you see and
-is switched off unless you turn it on.
+There is also an optional setting to **hide distant crowds**, which does change what you see
+and is switched off unless you turn it on.
 
 ### Install
 
@@ -60,9 +57,8 @@ Changes apply straight away and save themselves. The panel never takes over your
 
 | Setting | Default | What It Does |
 |---|---|---|
-| Crowd Performance | On | Master switch for everything below |
-| Remove Duplicate Characters | On | Free frames, no visible change |
-| Skip Unused Shadow Work | On | Free frames, no visible change |
+| Crowd Performance | On | Master switch for the NPC work below |
+| Skip Unused Shadow Work | On | A few free frames, no visible change |
 | Hide Faraway Crowds | Off | More frames, but distant people fade in as you approach |
 | Borderless Window | On | Alt-tab without the screen flickering |
 | Colour Theme | Synthwave | Six schemes for the panel |
@@ -72,17 +68,16 @@ give more frames and more noticeable fade-in. Pick the point where you stop noti
 
 ### How Much Does It Help?
 
-It depends entirely on your machine and where you are standing. The gain is largest in
-crowded streets and close to nothing in a quiet room or indoors, because it works by
-removing per-character work.
+Be realistic about this. On the author's machine, in a crowded street:
 
-It also only helps if your processor is the thing holding you back, which is common in busy
-areas of this game. If your graphics card is the limit instead, expect very little.
+- **Skip Unused Shadow Work: around 3 to 5 fps.** Free, no visual change.
+- **Hide Faraway Crowds at 20m: considerably more**, at the cost of obvious pop-in.
 
-**Remove Duplicate Characters depends on your graphics preset.** On Very High the game draws
-every character several times over and there is a lot to remove. On lower presets it often
-draws them correctly already, so there is nothing to cut and this setting does very little.
-That is expected rather than a fault — Lumen will not touch anything it is not sure about.
+It helps most in **crowded streets** and close to nothing indoors or in quiet areas, because
+it works by cutting down per-character work. It also only helps if your **processor** is
+what is holding you back. If your graphics card is the limit instead, expect very little.
+
+This has been tested on one PC by one person. Your results will differ.
 
 ### Something Looks Wrong?
 
@@ -91,6 +86,16 @@ without a restart.
 
 If a problem persists, please open an [issue](../../issues) with your
 `BepInEx\LogOutput.log` attached.
+
+### Thanks
+
+- **[@master63dotcom](https://github.com/master63dotcom)** spotted that turning the
+  optimizer off left its changes in place instead of restoring them, and opened
+  [#2](../../pull/2) with a fix and a regression suite. The fix that shipped here is a
+  smaller one, but finding it was his.
+- **zawmbie** and **Eternauta** on the Steam forums reported NPCs disappearing on anything
+  below Very High. That turned out to be a real bug, and chasing it led to removing a
+  feature that had never worked the way it was supposed to.
 
 ## Licence
 

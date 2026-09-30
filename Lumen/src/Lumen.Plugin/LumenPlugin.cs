@@ -16,7 +16,8 @@ namespace Lumen
     public class LumenPlugin : BasePlugin
     {
         public const string Guid = "dev.lumen.nivalis";
-        public const string Version = "0.1.0";
+        /// <summary>Generated from LumenVersion at build time; never edit by hand.</summary>
+        public const string Version = Build.Version;
 
         // Static shadow of BasePlugin.Log so every file can reach the logger without a
         // plugin instance. Intentional; `new` only silences the hiding warning.
@@ -37,6 +38,7 @@ namespace Lumen
             Log.LogInfo($"  RAM      : {SystemInfo.systemMemorySize} MB");
 
             LumenConfig.Bind(Config);
+            UpdateCheck.Start();
 
             try
             {

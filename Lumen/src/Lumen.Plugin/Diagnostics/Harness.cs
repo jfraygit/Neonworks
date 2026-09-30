@@ -67,8 +67,6 @@ namespace Lumen.Diagnostics
             // next tick and persists without a save step.
             Settings.Add(new BoolRow(LumenConfig.NpcOptimizerEnabled,
                 "Crowd Performance", "Recommended") { Section = "Performance" });
-            Settings.Add(new BoolRow(LumenConfig.CollapseStackedLods,
-                "Remove Duplicate Characters", "Free extra frames"));
             Settings.Add(new BoolRow(LumenConfig.RemoveShadowProxies,
                 "Skip Unused Shadow Work", "Free extra frames"));
             Settings.Add(new CullDistanceRow(LumenConfig.NpcCullDistance));
@@ -85,9 +83,6 @@ namespace Lumen.Diagnostics
             Probes.Add(new DaylightProbe());
             Probes.Add(new LiveShadowProxyCullProbe());
 
-            // What the optimizer actually does, and the LOD half of it on its own.
-            Probes.Add(new LiveNpcCleanupProbe());
-            Probes.Add(new LiveLodStackCullProbe());
 
             // Visible, and off by default, but a generous distance is an acceptable trade
             // for a lot of frames.

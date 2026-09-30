@@ -8,13 +8,13 @@ namespace Lumen.Tuning
     /// <summary>
     /// Removes redundant NPC renderer work. Always on, config driven.
     /// <para>
-    /// Characters render every LOD level of every body part simultaneously, and carry
-    /// dedicated skinned meshes whose only job is to cast a shadow the scene's lighting
-    /// never shows. Both are removed here.
+    /// Characters carry dedicated skinned meshes whose only job is to cast a shadow the
+    /// scene's lighting never shows. Those are removed, and optionally whole characters
+    /// past a distance the player chooses.
     /// </para>
     /// <para>
-    /// All of it happens in a single pass spread across frames. Separate passes would each
-    /// pay their own traversal cost, which is large enough to cancel out the saving.
+    /// It happens in a single pass spread across frames. Separate passes would each pay
+    /// their own traversal cost, which is large enough to cancel out the saving.
     /// </para>
     /// </summary>
     internal sealed class NpcOptimizer
@@ -26,11 +26,28 @@ namespace Lumen.Tuning
 
         private readonly List<BaseCharacter> _characters = new List<BaseCharacter>();
         private readonly Dictionary<int, State> _state = new Dictionary<int, State>();
-        private readonly Dictionary<int, bool> _originalEnabled = new Dictionary<int, bool>();
+        // Renderers Lumen switched off, and nothing else.
+        //
+        // This used to record the state it found, including "was already off", and restore
+        // that. That is wrong: the game's own LODGroup keeps choosing levels while a
+        // character is hidden, so a renderer noted as off can legitimately be on by the time
+        // the note is applied - and restoring it to off kills a body the game had just
+        // enabled. It showed up as a character's hair floating with nothing under it.
+        //
+        // Only ever turning renderers back ON removes the whole class of problem: Lumen
+        // cannot suppress something it did not suppress itself.
+        private readonly HashSet<int> _hidden = new HashSet<int>();
         private readonly HashSet<int> _redundant = new HashSet<int>();
 
         private float _sinceRefresh = RefreshInterval;
         private int _cursor;
+
+        // Last applied option values, so a change can be noticed and acted on.
+        private bool _optionsKnown;
+        private bool _dropShadows;
+
+        /// <summary>True while any renderer is overridden and owes a restore.</summary>
+        private bool HasOverrides => _state.Count > 0 || _hidden.Count > 0;
 
         internal NpcOptimizer()
         {
@@ -42,7 +59,29 @@ namespace Lumen.Tuning
 
         internal void Tick(float unscaledDeltaTime)
         {
-            if (!LumenConfig.NpcOptimizerEnabled.Value) return;
+            // Switching off has to put everything back, not merely stop working.
+            //
+            // This used to be a bare `return`, which left every renderer that had already
+            // been hidden hidden until the game restarted - while the panel told the player
+            // that turning it off restores the game immediately. The off switch is the
+            // escape hatch for anything going wrong, so it has to be the most reliable part
+            // of the whole mod.
+            if (!LumenConfig.NpcOptimizerEnabled.Value)
+            {
+                if (HasOverrides) RestoreAll();
+                return;
+            }
+
+            // A change to either cleanup option has to revisit characters that were already
+            // dealt with. The per-character state machine only re-evaluates on a transition,
+            // so without this a character marked clean keeps the previous decision for the
+            // rest of the session and the setting appears to do nothing.
+            bool shadows = LumenConfig.RemoveShadowProxies.Value;
+
+            if (_optionsKnown && shadows != _dropShadows) RestoreAll();
+
+            _dropShadows = shadows;
+            _optionsKnown = true;
 
             var camera = Camera.main;
             if (camera == null) return;
@@ -58,6 +97,8 @@ namespace Lumen.Tuning
             if (_characters.Count == 0) return;
 
             Vector3 eye = camera.transform.position;
+
+            ReportCullDiagnostics(camera, eye, unscaledDeltaTime);
 
             float cullDistance = LumenConfig.NpcCullDistance.Value;
             bool cullEnabled = cullDistance > 0f;
@@ -114,7 +155,6 @@ namespace Lumen.Tuning
             else
             {
                 CharacterRenderers.FindRedundant(renderers, _redundant,
-                    LumenConfig.CollapseStackedLods.Value,
                     LumenConfig.RemoveShadowProxies.Value);
             }
 
@@ -128,24 +168,15 @@ namespace Lumen.Tuning
 
                 if (shouldHide)
                 {
-                    // Record the value found the first time only, or an already-hidden
-                    // renderer would latch "disabled" as its original state.
-                    if (!renderer.enabled)
-                    {
-                        if (!_originalEnabled.ContainsKey(rendererId))
-                            _originalEnabled[rendererId] = false;
-                        continue;
-                    }
-
-                    if (!_originalEnabled.ContainsKey(rendererId))
-                        _originalEnabled[rendererId] = true;
+                    // Already off - leave it alone. Whatever turned it off owns it.
+                    if (!renderer.enabled) continue;
 
                     renderer.enabled = false;
+                    _hidden.Add(rendererId);
                 }
-                else if (_originalEnabled.TryGetValue(rendererId, out bool wasEnabled))
+                else if (_hidden.Remove(rendererId))
                 {
-                    renderer.enabled = wasEnabled;
-                    _originalEnabled.Remove(rendererId);
+                    renderer.enabled = true;
                 }
             }
 
@@ -178,11 +209,9 @@ namespace Lumen.Tuning
                         var renderer = renderers[i];
                         if (renderer == null) continue;
 
-                        int rendererId = renderer.GetInstanceID();
-                        if (!_originalEnabled.TryGetValue(rendererId, out bool wasEnabled)) continue;
+                        if (!_hidden.Remove(renderer.GetInstanceID())) continue;
 
-                        renderer.enabled = wasEnabled;
-                        _originalEnabled.Remove(rendererId);
+                        renderer.enabled = true;
                     }
                 }
 
@@ -194,6 +223,65 @@ namespace Lumen.Tuning
             catch (Exception)
             {
                 // Character already torn down. Its entries go on the next full restore.
+            }
+        }
+
+
+        // ------------------------------------------------------------------------------
+        // Diagnostics
+        // ------------------------------------------------------------------------------
+
+        private float _sinceReport;
+        private int _reportsLeft = 6;
+
+        /// <summary>
+        /// Periodically records which camera distances are measured from and how close the
+        /// nearest culled character is.
+        /// <para>
+        /// <c>Camera.main</c> returns the first enabled camera tagged MainCamera, and this
+        /// scene has five cameras. If it ever resolves to one that is not where the player
+        /// is, every distance is wrong and characters standing in front of you measure as
+        /// far away. This says so outright instead of leaving it to be inferred.
+        /// </para>
+        /// </summary>
+        private void ReportCullDiagnostics(Camera camera, Vector3 eye, float unscaledDeltaTime)
+        {
+            if (_reportsLeft <= 0) return;
+            if (LumenConfig.NpcCullDistance.Value <= 0f) return;
+
+            _sinceReport += unscaledDeltaTime;
+            if (_sinceReport < 5f) return;
+            _sinceReport = 0f;
+            _reportsLeft--;
+
+            try
+            {
+                float nearestCulled = float.MaxValue;
+                int culled = 0;
+
+                foreach (var character in _characters)
+                {
+                    try
+                    {
+                        if (!_state.TryGetValue(character.GetInstanceID(), out State state)) continue;
+                        if (state != State.Culled) continue;
+
+                        culled++;
+                        float distance = Vector3.Distance(character.transform.position, eye);
+                        if (distance < nearestCulled) nearestCulled = distance;
+                    }
+                    catch (Exception) { }
+                }
+
+                LumenPlugin.Log.LogInfo(
+                    $"[cull] camera='{camera.name}' at {eye.x:0},{eye.y:0},{eye.z:0}  " +
+                    $"limit={LumenConfig.NpcCullDistance.Value:0}m  " +
+                    $"characters={_characters.Count} culled={culled}  " +
+                    $"nearest culled={(culled == 0 ? "n/a" : nearestCulled.ToString("0.0") + "m")}");
+            }
+            catch (Exception ex)
+            {
+                LumenPlugin.Log.LogWarning($"Cull diagnostics failed: {ex.Message}");
             }
         }
 
@@ -216,8 +304,8 @@ namespace Lumen.Tuning
                             var renderer = renderers[i];
                             if (renderer == null) continue;
 
-                            if (_originalEnabled.TryGetValue(renderer.GetInstanceID(), out bool wasEnabled))
-                                renderer.enabled = wasEnabled;
+                            if (_hidden.Remove(renderer.GetInstanceID()))
+                                renderer.enabled = true;
                         }
                     }
                     catch (Exception) { /* gone; nothing to restore */ }
@@ -229,7 +317,7 @@ namespace Lumen.Tuning
             }
 
             _state.Clear();
-            _originalEnabled.Clear();
+            _hidden.Clear();
             CleanedCount = 0;
             CulledCount = 0;
         }

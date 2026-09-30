@@ -9,12 +9,12 @@ namespace Lumen
     internal static class LumenConfig
     {
         internal static ConfigEntry<bool> NpcOptimizerEnabled;
-        internal static ConfigEntry<bool> CollapseStackedLods;
         internal static ConfigEntry<bool> RemoveShadowProxies;
         internal static ConfigEntry<float> NpcCullDistance;
 
         internal static ConfigEntry<bool> BorderlessWindow;
         internal static ConfigEntry<string> Theme;
+        internal static ConfigEntry<bool> CheckForUpdates;
         internal static ConfigEntry<bool> DiagnosticsEnabled;
         internal static ConfigEntry<bool> OverlayVisibleOnStart;
         internal static ConfigEntry<float> SettleSeconds;
@@ -27,12 +27,6 @@ namespace Lumen
                 "NPCs", "Enabled", true,
                 "Master switch for the NPC renderer work. This is where essentially all of " +
                 "the mod's FPS comes from.");
-
-            CollapseStackedLods = config.Bind(
-                "NPCs", "CollapseStackedLods", true,
-                "Characters render every level of detail at once - the same body mesh drawn " +
-                "five times over. This keeps the most detailed one and switches off the " +
-                "copies underneath it. No visible change at any distance.");
 
             RemoveShadowProxies = config.Bind(
                 "NPCs", "RemoveShadowProxies", true,
@@ -66,6 +60,12 @@ namespace Lumen
                 new ConfigDescription(
                     "Colour scheme for the Lumen panel.",
                     new AcceptableValueList<string>(Diagnostics.Themes.Names)));
+
+            CheckForUpdates = config.Bind(
+                "Interface", "CheckForUpdates", true,
+                "Ask GitHub once at startup whether a newer Lumen has been released, and " +
+                "show a note in the panel if so. One request, nothing is sent, and every " +
+                "failure is silent. Set to false to make no network requests at all.");
 
             DiagnosticsEnabled = config.Bind(
                 "Diagnostics", "DeveloperMode", true,
