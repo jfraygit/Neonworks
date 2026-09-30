@@ -93,9 +93,6 @@ If a problem persists, please open an [issue](../../issues) with your
   optimizer off left its changes in place instead of restoring them, and opened
   [#2](../../pull/2) with a fix and a regression suite. The fix that shipped here is a
   smaller one, but finding it was his.
-- **zawmbie** and **Eternauta** on the Steam forums reported NPCs disappearing on anything
-  below Very High. That turned out to be a real bug, and chasing it led to removing a
-  feature that had never worked the way it was supposed to.
 
 ## Licence
 
