@@ -11,6 +11,7 @@ namespace Lumen
         internal static ConfigEntry<bool> NpcOptimizerEnabled;
         internal static ConfigEntry<bool> RemoveShadowProxies;
         internal static ConfigEntry<float> NpcCullDistance;
+        internal static ConfigEntry<bool> ProtectNamedNpcs;
 
         internal static ConfigEntry<bool> BorderlessWindow;
         internal static ConfigEntry<string> Theme;
@@ -47,6 +48,13 @@ namespace Lumen
                     "Lower means more frames and more popping. Pick the point where you " +
                     "stop noticing and leave it there.",
                     new AcceptableValueRange<float>(0f, 150f)));
+
+            ProtectNamedNpcs = config.Bind(
+                "NPCs", "ProtectNamedNpcs", false,
+                "Keep story NPCs, currently working staff and speaking characters visible " +
+                "when distance culling is enabled. Characters whose name status cannot be " +
+                "checked are kept visible too. Does not protect every restaurant customer " +
+                "or change shadow cleanup. May reduce performance gains.");
 
             BorderlessWindow = config.Bind(
                 "Display", "BorderlessWindow", true,

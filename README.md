@@ -60,11 +60,18 @@ Changes apply straight away and save themselves. The panel never takes over your
 | Crowd Performance | On | Master switch for the NPC work below |
 | Skip Unused Shadow Work | On | A few free frames, no visible change |
 | Hide Faraway Crowds | Off | More frames, but distant people fade in as you approach |
+| Protect named NPCs | Off | Keep story NPCs, working staff and speaking characters visible; may reduce FPS gains |
 | Borderless Window | On | Alt-tab without the screen flickering |
 | Colour Theme | Synthwave | Six schemes for the panel |
 
 **Hide Faraway Crowds** is the only setting that changes how the game looks. Lower distances
 give more frames and more noticeable fade-in. Pick the point where you stop noticing.
+
+With distance culling enabled, **Protect named NPCs** keeps story characters, staff during
+their working hours and speaking NPCs visible. It also keeps characters visible when their
+name status cannot be checked. It does not protect every restaurant customer. Shadow cleanup
+still follows its own setting. This option is off by default because keeping more people
+visible can reduce the performance gain from distance culling.
 
 ### How Much Does It Help?
 
