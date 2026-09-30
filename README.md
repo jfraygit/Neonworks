@@ -24,10 +24,25 @@ is switched off unless you turn it on.
 
 ### Install
 
-1. Install [BepInEx 6 (IL2CPP)](https://builds.bepinex.dev/projects/bepinex_be) into your
-   Nivalis Nights folder and run the game once so it sets itself up.
+Download **`Lumen-Installer.zip`** from [Releases](../../releases), unzip it anywhere, and
+double-click **Install Lumen**.
+
+It finds your game, installs BepInEx if you do not already have it, and puts Lumen in the
+right place. There is an **Uninstall Lumen** in the same folder if you change your mind.
+
+If Windows warns you about the file, that is because it is an unsigned script rather than a
+signed installer. The script is plain text and you can read every line of it
+[here](installer/install.ps1) before running it.
+
+<details>
+<summary>Installing by hand instead</summary>
+
+1. Install [BepInEx 6 (IL2CPP, win-x64)](https://builds.bepinex.dev/projects/bepinex_be)
+   into your Nivalis Nights folder.
 2. Download `Lumen.dll` from [Releases](../../releases).
 3. Put it in `Nivalis Nights\BepInEx\plugins\Lumen\`.
+
+</details>
 
 ### Using it
 
