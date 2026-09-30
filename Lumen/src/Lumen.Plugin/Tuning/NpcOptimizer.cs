@@ -132,8 +132,8 @@ namespace Lumen.Tuning
                     else
                         wanted = distanceSq > farSq ? State.Culled : State.Cleaned;
 
-                    // Recheck each visit: names, dialogue and work shifts can change while
-                    // a character is culled. Cleaned still allows the shadow-only cleanup.
+                    // Recheck each visit: story status and dialogue can change while a
+                    // character is culled. Cleaned still allows the shadow-only cleanup.
                     if (wanted == State.Culled && LumenConfig.ProtectNamedNpcs.Value &&
                         ShouldProtectName(character))
                         wanted = State.Cleaned;
@@ -151,20 +151,40 @@ namespace Lumen.Tuning
             }
         }
 
+        /// <summary>Why a character was kept visible past the cull distance.</summary>
+        private enum Protection { None, Story, Dialogue, Unreadable }
+
         private bool ShouldProtectName(BaseCharacter character)
+            => Classify(character) != Protection.None;
+
+        /// <summary>
+        /// Which rule, if any, keeps this character visible.
+        /// <para>
+        /// A missing <c>NameDisplay</c> means nameless rather than unknown: the component is
+        /// only attached to characters that have a name to show, so the anonymous crowd
+        /// simply does not carry one. Only a thrown lookup counts as unreadable, and that
+        /// is protected, because a failure to read is not evidence either way.
+        /// </para>
+        /// <para>
+        /// <c>ShouldDisplayName()</c> suppresses a regular name during random dialogue, so
+        /// story names are protected through that temporary UI change and speaking
+        /// characters are kept visible too. This is not a Real/Fake test.
+        /// </para>
+        /// </summary>
+        private Protection Classify(BaseCharacter character)
         {
             try
             {
                 var npc = character.TryCast<Character>();
-                if (npc == null) return true;
+                if (npc == null) return Protection.Unreadable;
 
                 var display = npc.NameDisplay;
-                if (display == null) return true;
+                if (display == null) return Protection.None;
 
-                // ShouldDisplayName() suppresses a regular name during random dialogue.
-                // Keep story/work names protected through that temporary UI change, and
-                // keep speaking characters visible too. This is not a Real/Fake test.
-                return display.hasStory || display.randomDialogue || display.IsWorking();
+                if (display.hasStory) return Protection.Story;
+                if (display.randomDialogue) return Protection.Dialogue;
+
+                return Protection.None;
             }
             catch (Exception ex)
             {
@@ -179,8 +199,7 @@ namespace Lumen.Tuning
                     catch (Exception) { /* Logging must not defeat the protection. */ }
                 }
 
-                // An unreadable label is not proof that this is a nameless crowd NPC.
-                return true;
+                return Protection.Unreadable;
             }
         }
 
@@ -272,12 +291,16 @@ namespace Lumen.Tuning
         // Diagnostics
         // ------------------------------------------------------------------------------
 
+        // A populated street is 150-250 characters; the logo and menu screens are about
+        // five. Without this the whole report budget is spent before the player loads in.
+        private const int CrowdForDiagnostics = 25;
+
         private float _sinceReport;
-        private int _reportsLeft = 6;
+        private int _reportsLeft = 8;
 
         /// <summary>
-        /// Periodically records which camera distances are measured from and how close the
-        /// nearest culled character is.
+        /// Periodically records which camera distances are measured from, how close the
+        /// nearest culled character is, and which rule is protecting whom.
         /// <para>
         /// <c>Camera.main</c> returns the first enabled camera tagged MainCamera, and this
         /// scene has five cameras. If it ever resolves to one that is not where the player
@@ -292,6 +315,10 @@ namespace Lumen.Tuning
 
             _sinceReport += unscaledDeltaTime;
             if (_sinceReport < 5f) return;
+
+            // Wait for a real crowd before spending a report.
+            if (_characters.Count < CrowdForDiagnostics) return;
+
             _sinceReport = 0f;
             _reportsLeft--;
 
@@ -319,11 +346,97 @@ namespace Lumen.Tuning
                     $"limit={LumenConfig.NpcCullDistance.Value:0}m  " +
                     $"characters={_characters.Count} culled={culled}  " +
                     $"nearest culled={(culled == 0 ? "n/a" : nearestCulled.ToString("0.0") + "m")}");
+
+                if (LumenConfig.ProtectNamedNpcs.Value)
+                    ReportProtectionBreakdown(eye);
             }
             catch (Exception ex)
             {
                 LumenPlugin.Log.LogWarning($"Cull diagnostics failed: {ex.Message}");
             }
+        }
+
+        private bool _unreadableIdentitiesLogged;
+
+        /// <summary>
+        /// Counts how many characters past the cull distance each protection rule keeps
+        /// visible, so the cost of the setting can be attributed to a rule.
+        /// <para>
+        /// Recomputed here rather than accumulated during the pass. A running counter would
+        /// count each character once per visit, roughly every eight frames, so the numbers
+        /// would be traffic rather than population.
+        /// </para>
+        /// </summary>
+        private void ReportProtectionBreakdown(Vector3 eye)
+        {
+            float limit = LumenConfig.NpcCullDistance.Value;
+            float farSq = limit * limit;
+
+            int beyond = 0, story = 0, dialogue = 0, unreadable = 0;
+
+            foreach (var character in _characters)
+            {
+                try
+                {
+                    if ((character.transform.position - eye).sqrMagnitude <= farSq) continue;
+
+                    beyond++;
+
+                    switch (Classify(character))
+                    {
+                        case Protection.Story: story++; break;
+                        case Protection.Dialogue: dialogue++; break;
+                        case Protection.Unreadable: unreadable++; break;
+                    }
+                }
+                catch (Exception) { }
+            }
+
+            int protectedTotal = story + dialogue + unreadable;
+            float share = beyond == 0 ? 0f : 100f * protectedTotal / beyond;
+
+            LumenPlugin.Log.LogInfo(
+                $"[protect] beyond {limit:0}m={beyond}  protected={protectedTotal} ({share:0}%)  " +
+                $"story={story} dialogue={dialogue} unreadable={unreadable}");
+
+            if (unreadable > 0) ReportUnreadableIdentities(eye, farSq);
+        }
+
+        /// <summary>Names the characters the check cannot classify, once per session.</summary>
+        private void ReportUnreadableIdentities(Vector3 eye, float farSq)
+        {
+            if (_unreadableIdentitiesLogged) return;
+            _unreadableIdentitiesLogged = true;
+
+            var seen = new Dictionary<string, int>();
+
+            foreach (var character in _characters)
+            {
+                try
+                {
+                    if ((character.transform.position - eye).sqrMagnitude <= farSq) continue;
+                    if (Classify(character) != Protection.Unreadable) continue;
+
+                    string label;
+                    try
+                    {
+                        var npc = character.TryCast<Character>();
+                        string why = npc == null ? "not a Character" : "no NameDisplay";
+                        label = $"{character.name} ({why})";
+                    }
+                    catch (Exception)
+                    {
+                        label = "<name unreadable>";
+                    }
+
+                    seen.TryGetValue(label, out int count);
+                    seen[label] = count + 1;
+                }
+                catch (Exception) { }
+            }
+
+            foreach (var entry in seen)
+                LumenPlugin.Log.LogInfo($"[protect]   unclassified x{entry.Value}: {entry.Key}");
         }
 
         /// <summary>Puts every renderer back the way it was found. Called on unload.</summary>

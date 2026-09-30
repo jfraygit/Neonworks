@@ -12,6 +12,7 @@ namespace Lumen
         internal static ConfigEntry<bool> RemoveShadowProxies;
         internal static ConfigEntry<float> NpcCullDistance;
         internal static ConfigEntry<bool> ProtectNamedNpcs;
+        internal static ConfigEntry<int> DevFrameCap;
 
         internal static ConfigEntry<bool> BorderlessWindow;
         internal static ConfigEntry<string> Theme;
@@ -51,10 +52,22 @@ namespace Lumen
 
             ProtectNamedNpcs = config.Bind(
                 "NPCs", "ProtectNamedNpcs", false,
-                "Keep story NPCs, currently working staff and speaking characters visible " +
-                "when distance culling is enabled. Characters whose name status cannot be " +
-                "checked are kept visible too. Does not protect every restaurant customer " +
-                "or change shadow cleanup. May reduce performance gains.");
+                "Keep story characters and anyone currently speaking visible when distance " +
+                "culling is enabled. Does not change shadow cleanup. In a busy street this " +
+                "protects roughly 3 to 5 characters out of 200 beyond the limit, so it " +
+                "costs very little. Characters whose name cannot be read at all are kept " +
+                "visible too.");
+
+            DevFrameCap = config.Bind(
+                "NPCs", "DevFrameCap", 0,
+                new ConfigDescription(
+                    "Testing aid, not a feature. Caps the frame rate so a problem that only " +
+                    "appears at low frame rates can be reproduced on a machine that does " +
+                    "not have them. 0 leaves the game alone. The game's own TargetFrameRate " +
+                    "in settings.ini ignores values outside its menu's list, which is why " +
+                    "this exists. Re-applied on a timer because applying graphics settings " +
+                    "resets it.",
+                    new AcceptableValueRange<int>(0, 300)));
 
             BorderlessWindow = config.Bind(
                 "Display", "BorderlessWindow", true,

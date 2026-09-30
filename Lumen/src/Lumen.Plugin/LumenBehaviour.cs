@@ -34,6 +34,15 @@ namespace Lumen
 
             try
             {
+                Tuning.FrameCap.Tick(dt);
+            }
+            catch (Exception ex)
+            {
+                LumenPlugin.Log.LogError($"Lumen frame cap tick failed: {ex}");
+            }
+
+            try
+            {
                 Optimizer?.Tick(dt);
             }
             catch (Exception ex)
@@ -76,6 +85,7 @@ namespace Lumen
                 Harness?.RestoreAll();
                 Harness?.Canvas.Destroy();
                 Optimizer?.RestoreAll();
+                Tuning.FrameCap.Restore();
             }
             catch (Exception ex)
             {

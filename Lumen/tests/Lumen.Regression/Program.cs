@@ -113,7 +113,6 @@ Test("named protection OFF preserves legacy culling without name lookups", () =>
 {
     using var f = new Fixture(3);
     ((Character)f.Characters[0]).NameDisplay.hasStory = true;
-    ((Character)f.Characters[1]).NameDisplay.Working = true;
     ((Character)f.Characters[2]).NameDisplay.randomDialogue = true;
     foreach (Character c in f.Characters.Take(3))
     {
@@ -122,15 +121,14 @@ Test("named protection OFF preserves legacy culling without name lookups", () =>
     }
     f.Run(60, 0.5);
     Check(f.Hidden == 3, "OFF keeps legacy distance culling for named characters");
-    Check(f.Characters.All(c => c.CastLookups == 0), "OFF must not query name or working state");
+    Check(f.Characters.All(c => c.CastLookups == 0), "OFF must not query name state");
 });
 
-Test("named protection ON protects story, workers and dialogue but permits unnamed culling", () =>
+Test("named protection ON protects story and dialogue but permits unnamed culling", () =>
 {
     using var f = new Fixture(4);
     LumenConfig.ProtectNamedNpcs.Value = true;
     ((Character)f.Characters[0]).NameDisplay.hasStory = true;
-    ((Character)f.Characters[1]).NameDisplay.Working = true;
     ((Character)f.Characters[2]).NameDisplay.randomDialogue = true;
     foreach (Character c in f.Characters.Take(3))
     {
@@ -138,8 +136,26 @@ Test("named protection ON protects story, workers and dialogue but permits unnam
         c.NameDisplay.isActiveAndEnabled = false;
     }
     f.Run(60, 0.5);
-    Check(f.Characters.Take(3).All(c => c.Renderers[0].enabled), "Named classifications stay protected even when their label UI is inactive");
-    Check(!f.Characters[3].Renderers[0].enabled && f.Hidden == 1, "Unnamed far character remains eligible");
+    Check(f.Characters[0].Renderers[0].enabled && f.Characters[2].Renderers[0].enabled,
+        "Named classifications stay protected even when their label UI is inactive");
+    Check(!f.Characters[1].Renderers[0].enabled && !f.Characters[3].Renderers[0].enabled && f.Hidden == 2,
+        "Unnamed far characters remain eligible");
+});
+
+// The rule this replaced protected anything without a NameDisplay, on the grounds that an
+// unreadable label is not proof of a nameless NPC. In this game it is: only characters with
+// a name to show carry the component. Live samples had fifteen ordinary pedestrians -
+// Male001, Female013, Random Male 06 - protected in every reading, more than every other
+// rule combined.
+Test("a character with no NameDisplay is nameless, not unknown", () =>
+{
+    using var f = new Fixture(2);
+    LumenConfig.ProtectNamedNpcs.Value = true;
+    ((Character)f.Characters[0]).NameDisplay = null;
+    ((Character)f.Characters[1]).NameDisplay.hasStory = true;
+    f.Run(60, 0.5);
+    Check(!f.Characters[0].Renderers[0].enabled, "No NameDisplay means eligible for culling");
+    Check(f.Characters[1].Renderers[0].enabled, "A story character alongside it is still protected");
 });
 
 Test("enabling named protection restores an already culled character", () =>
@@ -157,19 +173,19 @@ Test("enabling named protection restores an already culled character", () =>
     Check(!c.Renderers[0].enabled, "OFF returns to the old distance behavior");
 });
 
-Test("working and dialogue state changes are re-evaluated while far", () =>
+Test("story and dialogue state changes are re-evaluated while far", () =>
 {
     using var f = new Fixture(1);
     LumenConfig.ProtectNamedNpcs.Value = true;
     var c = (Character)f.Characters[0];
     f.Run(10, 0.5);
     Check(!c.Renderers[0].enabled, "Initially unnamed character can be culled");
-    c.NameDisplay.Working = true;
+    c.NameDisplay.hasStory = true;
     f.Run(10, 0.5);
-    Check(c.Renderers[0].enabled, "Becoming a working staff member restores the character");
-    c.NameDisplay.Working = false;
+    Check(c.Renderers[0].enabled, "Gaining story status restores the character");
+    c.NameDisplay.hasStory = false;
     f.Run(10, 0.5);
-    Check(!c.Renderers[0].enabled, "End of working state removes that protection");
+    Check(!c.Renderers[0].enabled, "Losing story status removes that protection");
     c.NameDisplay.randomDialogue = true;
     f.Run(10, 0.5);
     Check(c.Renderers[0].enabled, "Dialogue state restores the character even if name display itself is suppressed");
@@ -192,23 +208,30 @@ Test("named distance protection leaves shadow cleanup active", () =>
     Check(c.Renderers.All(r => r.enabled), "Shadow option OFF restores its own override independently");
 });
 
-Test("unknown, missing and faulted name metadata protects conservatively", () =>
+// Faulted metadata still protects; absent metadata no longer does. The distinction is the
+// whole point: a throw means we could not read the answer, a null NameDisplay means the
+// answer is "this one has no name".
+Test("faulted name metadata protects, absent metadata does not", () =>
 {
     using var f = new Fixture(6);
     var unknown = new BaseCharacter { Renderers = f.Characters[0].Renderers };
     unknown.transform.position = new Vector3(100, 0, 0);
-    CharacterRegistry.Entries[0] = unknown;
-    ((Character)f.Characters[1]).NameDisplay = null;
-    ((Character)f.Characters[2]).FailDisplay = true;
-    ((Character)f.Characters[3]).NameDisplay.FailWorking = true;
-    f.Characters[4].FailCast = true;
-    ((Character)f.Characters[5]).NameDisplay.Alive = false;
+    CharacterRegistry.Entries[0] = unknown;          // not a Character at all
+    ((Character)f.Characters[1]).NameDisplay = null; // nameless
+    ((Character)f.Characters[2]).FailDisplay = true; // throws on access
+    f.Characters[4].FailCast = true;                 // throws on cast
+    ((Character)f.Characters[5]).NameDisplay.Alive = false; // destroyed, reads as null
     f.Run(10, 0.5);
     Check(f.Hidden == 6, "With protection OFF, even unreadable metadata uses legacy culling");
     LumenConfig.ProtectNamedNpcs.Value = true;
     LumenPlugin.Log.ThrowWarning = true;
     f.Run(10, 0.5);
-    Check(CharacterRegistry.Entries.All(c => c.Renderers[0].enabled), "Missing or failed metadata restores existing hides even when warning logging also throws");
+
+    var entries = CharacterRegistry.Entries;
+    Check(entries[0].Renderers[0].enabled && entries[2].Renderers[0].enabled && entries[4].Renderers[0].enabled,
+        "Unreadable metadata restores existing hides even when warning logging also throws");
+    Check(!entries[1].Renderers[0].enabled && !entries[3].Renderers[0].enabled && !entries[5].Renderers[0].enabled,
+        "A missing or destroyed NameDisplay is nameless and stays culled");
     Check(LumenPlugin.Log.WarningCalls == 1, "The actual name-fault warning path was exercised once");
 });
 

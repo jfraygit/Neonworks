@@ -60,18 +60,17 @@ Changes apply straight away and save themselves. The panel never takes over your
 | Crowd Performance | On | Master switch for the NPC work below |
 | Skip Unused Shadow Work | On | A few free frames, no visible change |
 | Hide Faraway Crowds | Off | More frames, but distant people fade in as you approach |
-| Protect named NPCs | Off | Keep story NPCs, working staff and speaking characters visible; may reduce FPS gains |
+| Protect Named NPCs | Off | Keeps story characters visible past the cull distance |
 | Borderless Window | On | Alt-tab without the screen flickering |
 | Colour Theme | Synthwave | Six schemes for the panel |
 
 **Hide Faraway Crowds** is the only setting that changes how the game looks. Lower distances
 give more frames and more noticeable fade-in. Pick the point where you stop noticing.
 
-With distance culling enabled, **Protect named NPCs** keeps story characters, staff during
-their working hours and speaking NPCs visible. It also keeps characters visible when their
-name status cannot be checked. It does not protect every restaurant customer. Shadow cleanup
-still follows its own setting. This option is off by default because keeping more people
-visible can reduce the performance gain from distance culling.
+**Protect Named NPCs** only does anything when Hide Faraway Crowds is on. It keeps story
+characters, and anyone currently speaking, visible past the distance where everyone else
+gets hidden. In a busy street that is about three to five people out of two hundred, so it
+costs almost nothing. It is off by default.
 
 ### How Much Does It Help?
 
@@ -100,6 +99,10 @@ If a problem persists, please open an [issue](../../issues) with your
   optimizer off left its changes in place instead of restoring them, and opened
   [#2](../../pull/2) with a fix and a regression suite. The fix that shipped here is a
   smaller one, but finding it was his.
+- The same author then found the bug fixed in 0.1.3, where the crowd scan restarted before
+  it had finished and left people hidden at low frame rates, and opened
+  [#3](../../pull/3) with the fix, the Protect Named NPCs setting and the tests that go
+  with them.
 
 ## Licence
 

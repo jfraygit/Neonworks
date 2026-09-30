@@ -71,7 +71,7 @@ namespace Lumen.Diagnostics
                 "Skip Unused Shadow Work", "Free extra frames"));
             Settings.Add(new CullDistanceRow(LumenConfig.NpcCullDistance));
             Settings.Add(new BoolRow(LumenConfig.ProtectNamedNpcs,
-                "Protect named NPCs", "May reduce FPS gains"));
+                "Protect Named NPCs", "Keeps story characters"));
 
             Settings.Add(new BoolRow(LumenConfig.BorderlessWindow,
                 "Borderless Window", "Switch apps instantly") { Section = "Display" });
