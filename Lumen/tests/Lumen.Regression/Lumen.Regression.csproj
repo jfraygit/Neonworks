@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InstallToGame>false</InstallToGame>
+    <AssemblyName>Lumen.Regression</AssemblyName>
+  </PropertyGroup>
+  <!-- No plugin ProjectReference, package, interop assembly or installation target. -->
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+    <Compile Include="../../src/Lumen.Plugin/Tuning/NpcOptimizer.cs" Link="Production/NpcOptimizer.cs" />
+    <Compile Include="../../src/Lumen.Plugin/Tuning/RendererEnabledLedger.cs" Link="Production/RendererEnabledLedger.cs" />
+    <Compile Include="../../src/Lumen.Plugin/Tuning/CharacterRenderers.cs" Link="Production/CharacterRenderers.cs" />
+    <Compile Include="../../src/Lumen.Plugin/LumenPlugin.cs" Link="Production/LumenPlugin.cs" />
+    <Compile Include="../../src/Lumen.Plugin/LumenConfig.cs" Link="Production/LumenConfig.cs" />
+  </ItemGroup>
+</Project>

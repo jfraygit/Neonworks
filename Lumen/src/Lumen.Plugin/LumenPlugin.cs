@@ -83,9 +83,15 @@ namespace Lumen
             try
             {
                 LumenBehaviour.Harness?.RestoreAll();
-                LumenBehaviour.Harness = null;
-
                 LumenBehaviour.Optimizer?.RestoreAll();
+                if (LumenBehaviour.Optimizer != null &&
+                    LumenBehaviour.Optimizer.PendingRestoreCount != 0)
+                {
+                    Log.LogWarning("Lumen unload postponed: renderer restoration is still pending.");
+                    return false;
+                }
+
+                LumenBehaviour.Harness = null;
                 LumenBehaviour.Optimizer?.Dispose();
                 LumenBehaviour.Optimizer = null;
 
@@ -94,6 +100,7 @@ namespace Lumen
             catch (Exception ex)
             {
                 Log.LogError($"Lumen unload failed: {ex}");
+                return false;
             }
 
             return true;

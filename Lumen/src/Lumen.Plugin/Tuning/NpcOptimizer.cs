@@ -6,16 +6,9 @@ using UnityEngine;
 namespace Lumen.Tuning
 {
     /// <summary>
-    /// Removes redundant NPC renderer work. Always on, config driven.
-    /// <para>
-    /// Characters render every LOD level of every body part simultaneously, and carry
-    /// dedicated skinned meshes whose only job is to cast a shadow the scene's lighting
-    /// never shows. Both are removed here.
-    /// </para>
-    /// <para>
-    /// All of it happens in a single pass spread across frames. Separate passes would each
-    /// pay their own traversal cost, which is large enough to cancel out the saving.
-    /// </para>
+    /// Applies optional renderer filters and camera-distance culling in slices of the crowd.
+    /// Renderer names alone do not prove redundant drawing or invisible shadows.
+    /// Original enabled values remain owned until restoration succeeds or the target is gone.
     /// </summary>
     internal sealed class NpcOptimizer
     {
@@ -26,11 +19,15 @@ namespace Lumen.Tuning
 
         private readonly List<BaseCharacter> _characters = new List<BaseCharacter>();
         private readonly Dictionary<int, State> _state = new Dictionary<int, State>();
-        private readonly Dictionary<int, bool> _originalEnabled = new Dictionary<int, bool>();
+        private readonly Dictionary<int, BaseCharacter> _owners = new Dictionary<int, BaseCharacter>();
+        private readonly RendererEnabledLedger _enabled = new RendererEnabledLedger();
         private readonly HashSet<int> _redundant = new HashSet<int>();
+        private readonly HashSet<int> _registered = new HashSet<int>();
 
         private float _sinceRefresh = RefreshInterval;
         private int _cursor;
+        private bool _optionsKnown, _collapseLods, _dropShadows;
+        private bool _restoreAllRequested, _restoreWarning;
 
         internal NpcOptimizer()
         {
@@ -39,10 +36,35 @@ namespace Lumen.Tuning
 
         internal int CleanedCount { get; private set; }
         internal int CulledCount { get; private set; }
+        internal int PendingRestoreCount => _enabled.PendingRestoreCount;
 
         internal void Tick(float unscaledDeltaTime)
         {
-            if (!LumenConfig.NpcOptimizerEnabled.Value) return;
+            // Switching off must work even while there is no camera or live registry.
+            if (!LumenConfig.NpcOptimizerEnabled.Value)
+            {
+                RestoreAll();
+                return;
+            }
+            if (_restoreAllRequested)
+            {
+                RestoreAll();
+                if (_restoreAllRequested) return;
+            }
+
+            bool collapse = LumenConfig.CollapseStackedLods.Value;
+            bool shadows = LumenConfig.RemoveShadowProxies.Value;
+            if (_optionsKnown && (collapse != _collapseLods || shadows != _dropShadows))
+            {
+                // Revisit already-Cleaned characters as well as future state transitions.
+                RestoreAll();
+                if (_restoreAllRequested) return;
+            }
+            _collapseLods = collapse;
+            _dropShadows = shadows;
+            if (!_optionsKnown)
+                LumenPlugin.Log.LogInfo($"NPC optimizer active: collapseLods={collapse}, removeShadowProxies={shadows}, cullDistance={LumenConfig.NpcCullDistance.Value}.");
+            _optionsKnown = true;
 
             var camera = Camera.main;
             if (camera == null) return;
@@ -53,33 +75,38 @@ namespace Lumen.Tuning
                 _sinceRefresh = 0f;
                 CharacterRegistry.CopyInto(_characters);
                 _cursor = 0;
+                _registered.Clear();
+                foreach (var character in _characters)
+                {
+                    try { if (character != null && character.isActiveAndEnabled) _registered.Add(character.GetInstanceID()); }
+                    catch (Exception) { }
+                }
+                foreach (int id in new List<int>(_owners.Keys))
+                    if (!_registered.Contains(id)) Release(id);
+                if (_restoreAllRequested) return;
             }
 
             if (_characters.Count == 0) return;
-
             Vector3 eye = camera.transform.position;
-
             float cullDistance = LumenConfig.NpcCullDistance.Value;
             bool cullEnabled = cullDistance > 0f;
             float farSq = cullDistance * cullDistance;
             float nearSq = cullDistance * Hysteresis * cullDistance * Hysteresis;
 
-            // An eighth of the crowd per frame: the full set is re-evaluated in about
-            // 130ms, and no single frame pays for all of it.
+            // An eighth of the crowd per frame; elapsed revisit time depends on frame rate.
             int slice = Math.Max(8, _characters.Count / 8);
-
             for (int n = 0; n < slice; n++)
             {
-                if (_characters.Count == 0) return;
+                if (_characters.Count == 0 || _restoreAllRequested) return;
                 if (_cursor >= _characters.Count) _cursor = 0;
-
                 var character = _characters[_cursor++];
-
+                int? ownerId = null;
                 try
                 {
+                    if (character == null || !character.isActiveAndEnabled) continue;
                     int id = character.GetInstanceID();
+                    ownerId = id;
                     _state.TryGetValue(id, out State current);
-
                     float distanceSq = (character.transform.position - eye).sqrMagnitude;
 
                     State wanted;
@@ -93,8 +120,9 @@ namespace Lumen.Tuning
                 }
                 catch (Exception)
                 {
-                    // A character that went away between refreshes. Drop it and move on;
-                    // the next refresh rebuilds the list.
+                    // Apply can fail after a setter already changed a renderer. Its stored
+                    // target must be restored even when no completed state was recorded.
+                    if (ownerId.HasValue) Release(ownerId.Value);
                     int index = Math.Max(0, _cursor - 1);
                     if (index < _characters.Count) _characters.RemoveAt(index);
                     _cursor = index;
@@ -104,139 +132,122 @@ namespace Lumen.Tuning
 
         private void ApplyState(BaseCharacter character, int id, State from, State to)
         {
+            _owners[id] = character;
+            // A culled renderer may have been detached since acquisition. Restore the retained
+            // targets before filtering the current hierarchy, not just those found below it now.
+            if (to == State.Cleaned)
+            {
+                if (!_enabled.RestoreOwner(id)) throw new InvalidOperationException("Renderer restoration remains pending.");
+                RequireOwner(character, id);
+            }
             var renderers = character.GetComponentsInChildren<Renderer>(true);
             if (renderers == null) return;
 
-            if (to == State.Culled)
-            {
-                _redundant.Clear();
-            }
-            else
-            {
-                CharacterRenderers.FindRedundant(renderers, _redundant,
-                    LumenConfig.CollapseStackedLods.Value,
-                    LumenConfig.RemoveShadowProxies.Value);
-            }
+            if (to == State.Culled) _redundant.Clear();
+            else CharacterRenderers.FindRedundant(renderers, _redundant, _collapseLods, _dropShadows);
 
             for (int i = 0; i < renderers.Length; i++)
             {
+                RequireOwner(character, id);
                 var renderer = renderers[i];
                 if (renderer == null) continue;
-
-                bool shouldHide = to == State.Culled || _redundant.Contains(renderer.GetInstanceID());
                 int rendererId = renderer.GetInstanceID();
-
-                if (shouldHide)
-                {
-                    // Record the value found the first time only, or an already-hidden
-                    // renderer would latch "disabled" as its original state.
-                    if (!renderer.enabled)
-                    {
-                        if (!_originalEnabled.ContainsKey(rendererId))
-                            _originalEnabled[rendererId] = false;
-                        continue;
-                    }
-
-                    if (!_originalEnabled.ContainsKey(rendererId))
-                        _originalEnabled[rendererId] = true;
-
-                    renderer.enabled = false;
-                }
-                else if (_originalEnabled.TryGetValue(rendererId, out bool wasEnabled))
-                {
-                    renderer.enabled = wasEnabled;
-                    _originalEnabled.Remove(rendererId);
-                }
+                bool shouldHide = to == State.Culled || _redundant.Contains(rendererId);
+                if (shouldHide) _enabled.Hide(id, new RendererTarget(renderer, rendererId));
+                else if (!_enabled.RestoreRenderer(rendererId))
+                    throw new InvalidOperationException("Renderer restoration remains pending.");
             }
-
+            RequireOwner(character, id);
             _state[id] = to;
-
             if (from == State.Culled) CulledCount = Math.Max(0, CulledCount - 1);
             if (from == State.Cleaned) CleanedCount = Math.Max(0, CleanedCount - 1);
             if (to == State.Culled) CulledCount++;
             if (to == State.Cleaned) CleanedCount++;
         }
 
-        /// <summary>
-        /// Hands a character's renderers back as it returns to the pool, and forgets it,
-        /// so the next NPC to reuse the object starts from a clean slate.
-        /// </summary>
+        private void RequireOwner(BaseCharacter character, int id)
+        {
+            if (_restoreAllRequested || !_owners.TryGetValue(id, out var owner) || !ReferenceEquals(owner, character))
+                throw new InvalidOperationException("Character was released during the renderer update.");
+        }
+
         private void Release(BaseCharacter character)
         {
             try
             {
-                if (character == null) return;
-
-                int id = character.GetInstanceID();
-                if (!_state.ContainsKey(id)) return;
-
-                var renderers = character.GetComponentsInChildren<Renderer>(true);
-                if (renderers != null)
-                {
-                    for (int i = 0; i < renderers.Length; i++)
-                    {
-                        var renderer = renderers[i];
-                        if (renderer == null) continue;
-
-                        int rendererId = renderer.GetInstanceID();
-                        if (!_originalEnabled.TryGetValue(rendererId, out bool wasEnabled)) continue;
-
-                        renderer.enabled = wasEnabled;
-                        _originalEnabled.Remove(rendererId);
-                    }
-                }
-
-                if (_state[id] == State.Culled) CulledCount = Math.Max(0, CulledCount - 1);
-                if (_state[id] == State.Cleaned) CleanedCount = Math.Max(0, CleanedCount - 1);
-
-                _state.Remove(id);
+                if (ReferenceEquals(character, null)) return;
+                Release(character.GetInstanceID());
             }
             catch (Exception)
             {
-                // Character already torn down. Its entries go on the next full restore.
+                // The owner's wrapper is gone; retained renderer references still allow recovery.
+                RestoreAll();
             }
         }
 
-        /// <summary>Puts every renderer back the way it was found. Called on unload.</summary>
+        private void Release(int id)
+        {
+            // Partial Apply registers its owner before the first setter. Unrelated disable
+            // callbacks must not scan/copy the full renderer ledger.
+            if (!_owners.ContainsKey(id)) return;
+            if (!_enabled.RestoreOwner(id))
+            {
+                _restoreAllRequested = true;
+                WarnPending();
+                return;
+            }
+            if (_state.TryGetValue(id, out var state))
+            {
+                if (state == State.Culled) CulledCount = Math.Max(0, CulledCount - 1);
+                if (state == State.Cleaned) CleanedCount = Math.Max(0, CleanedCount - 1);
+                _state.Remove(id);
+            }
+            _owners.Remove(id);
+        }
+
+        /// <summary>Restore retained renderer references, including absent/partially processed owners.</summary>
         internal void RestoreAll()
         {
-            try
+            int trackedBefore = _enabled.Count;
+            _restoreAllRequested = true;
+            if (!_enabled.RestoreAll())
             {
-                CharacterRegistry.CopyInto(_characters);
-
-                foreach (var character in _characters)
-                {
-                    try
-                    {
-                        var renderers = character.GetComponentsInChildren<Renderer>(true);
-                        if (renderers == null) continue;
-
-                        for (int i = 0; i < renderers.Length; i++)
-                        {
-                            var renderer = renderers[i];
-                            if (renderer == null) continue;
-
-                            if (_originalEnabled.TryGetValue(renderer.GetInstanceID(), out bool wasEnabled))
-                                renderer.enabled = wasEnabled;
-                        }
-                    }
-                    catch (Exception) { /* gone; nothing to restore */ }
-                }
+                WarnPending();
+                return;
             }
-            catch (Exception ex)
-            {
-                LumenPlugin.Log.LogError($"NpcOptimizer restore failed: {ex}");
-            }
-
             _state.Clear();
-            _originalEnabled.Clear();
+            _owners.Clear();
+            _characters.Clear();
+            _cursor = 0;
+            _sinceRefresh = RefreshInterval;
+            _optionsKnown = false;
+            _restoreAllRequested = false;
+            _restoreWarning = false;
             CleanedCount = 0;
             CulledCount = 0;
+            if (trackedBefore > 0)
+                LumenPlugin.Log.LogInfo($"NPC renderer restoration completed: {trackedBefore} tracked state(s) processed, 0 remaining.");
+        }
+
+        private void WarnPending()
+        {
+            if (_restoreWarning) return;
+            _restoreWarning = true;
+            LumenPlugin.Log.LogWarning($"NPC renderer restoration is pending for {PendingRestoreCount} renderer(s); changes are paused and restoration will retry.");
         }
 
         internal void Dispose()
         {
-            CharacterRegistry.Disabled -= Release;
+            if (PendingRestoreCount == 0) CharacterRegistry.Disabled -= Release;
+        }
+
+        private sealed class RendererTarget : IRendererEnabledTarget
+        {
+            private readonly Renderer _renderer;
+            public int Id { get; }
+            internal RendererTarget(Renderer renderer, int id) { _renderer = renderer; Id = id; }
+            public bool IsAlive => _renderer != null && _renderer.GetInstanceID() == Id;
+            public bool Enabled { get => _renderer.enabled; set => _renderer.enabled = value; }
         }
     }
 }
