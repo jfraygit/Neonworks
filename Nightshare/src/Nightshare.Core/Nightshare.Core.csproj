@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Nightshare.Core is deliberately plain .NET.
+
+    It must NEVER reference Unity, BepInEx or Il2CppInterop. The fake peer and the unit
+    tests depend on being able to run this code with no game attached, which is what makes
+    protocol iteration cheap. If you find yourself wanting a UnityEngine type in here, the
+    type belongs in Nightshare.Plugin and an abstraction belongs here.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Nightshare.Core</AssemblyName>
+    <RootNamespace>Nightshare.Core</RootNamespace>
+    <Version>$(NightshareVersion)</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      CS1591 demands an XML comment on every public member, including interface
+      implementations whose documentation already lives on the interface. Restating it
+      per implementation is noise that buries warnings worth reading.
+    -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

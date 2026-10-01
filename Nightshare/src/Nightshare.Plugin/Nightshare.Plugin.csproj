@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>Nightshare</AssemblyName>
+    <RootNamespace>Nightshare</RootNamespace>
+    <Version>$(NightshareVersion)</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Interop assemblies are reference-only; never copy 124 DLLs into bin. -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <!-- BepInEx 6 IL2CPP framework -->
+  <ItemGroup>
+    <Reference Include="BepInEx.Core"><HintPath>$(BepInExCore)\BepInEx.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP"><HintPath>$(BepInExCore)\BepInEx.Unity.IL2CPP.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx.Unity.Common"><HintPath>$(BepInExCore)\BepInEx.Unity.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppInterop.Runtime"><HintPath>$(BepInExCore)\Il2CppInterop.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2CppInterop.Common"><HintPath>$(BepInExCore)\Il2CppInterop.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(BepInExCore)\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!-- Game and Unity interop assemblies -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp"><HintPath>$(BepInExInterop)\Assembly-CSharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Assembly-CSharp-firstpass"><HintPath>$(BepInExInterop)\Assembly-CSharp-firstpass.dll</HintPath><Private>false</Private></Reference>
+    <!-- Easy Save 2. The game's own serialiser, reused as the wire format. -->
+    <Reference Include="ES2"><HintPath>$(BepInExInterop)\ES2.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Il2Cppmscorlib"><HintPath>$(BepInExInterop)\Il2Cppmscorlib.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(BepInExInterop)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(BepInExInterop)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+
+    <!--
+      Real Unity UI for Nightshare's own panels: Canvas, Image and TextMeshPro, using the
+      game's own font asset. IMGUI reads as a debug window no matter how carefully it is
+      composed; this is what makes a panel look like it belongs to the game.
+    -->
+    <Reference Include="UnityEngine.UI"><HintPath>$(BepInExInterop)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(BepInExInterop)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(BepInExInterop)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(BepInExInterop)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(BepInExInterop)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
+    <!-- Collider, for removing the one on the beacon primitive. -->
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(BepInExInterop)\UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <!-- Animator, for driving a remote avatar's walk cycle. -->
+    <Reference Include="UnityEngine.AnimationModule"><HintPath>$(BepInExInterop)\UnityEngine.AnimationModule.dll</HintPath><Private>false</Private></Reference>
+    <!--
+      The new Input System. This game is built for it EXCLUSIVELY: the legacy
+      UnityEngine.Input static throws an Il2CppException at runtime, confirmed in game.
+      UnityEngine.InputLegacyModule is deliberately not referenced so nobody reaches for
+      Input.GetKeyDown by accident.
+    -->
+    <Reference Include="Unity.InputSystem"><HintPath>$(BepInExInterop)\Unity.InputSystem.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <!-- The shared protocol and transport. Plain .NET, no Unity dependency. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Nightshare.Core\Nightshare.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    Drop the plugin and Nightshare.Core into the game so a build is immediately testable.
+    Core must be copied too or the plugin fails to load with a TypeLoadException that does
+    not name the missing assembly.
+  -->
+  <Target Name="InstallToGame" AfterTargets="Build" Condition="Exists('$(BepInExDir)')">
+    <MakeDir Directories="$(BepInExDir)\plugins\Nightshare" />
+    <Copy SourceFiles="$(TargetPath);$(TargetDir)Nightshare.Core.dll"
+          DestinationFolder="$(BepInExDir)\plugins\Nightshare"
+          ContinueOnError="true" />
+    <Message Importance="high" Text="Nightshare installed to $(BepInExDir)\plugins\Nightshare" />
+  </Target>
+
+</Project>
