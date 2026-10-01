@@ -46,6 +46,7 @@ namespace Lumen.Tuning
         private bool _optionsKnown;
         private bool _dropShadows;
         private bool _nameLookupWarningLogged;
+        private bool _shadowReported;
 
         /// <summary>True while any renderer is overridden and owes a restore.</summary>
         private bool HasOverrides => _state.Count > 0 || _hidden.Count > 0;
@@ -151,6 +152,34 @@ namespace Lumen.Tuning
             }
         }
 
+        /// <summary>
+        /// Says once, out loud, how many of a character's renderers matched the shadow
+        /// naming convention.
+        /// <para>
+        /// The shipped feature rests on those renderers being named with a <c>_Shadow</c>
+        /// suffix, which is an asset naming convention rather than anything in code. A game
+        /// patch can rename them and nothing would fail: no exception, no missing member,
+        /// no compile error. Lumen would simply find nothing and quietly stop doing the one
+        /// thing it exists to do, while every other check still passed.
+        /// </para>
+        /// </summary>
+        private void ReportShadowMatch(BaseCharacter character, int renderers, int matched)
+        {
+            if (_shadowReported) return;
+            if (!LumenConfig.RemoveShadowProxies.Value) return;
+
+            _shadowReported = true;
+
+            try
+            {
+                LumenPlugin.Log.LogInfo(
+                    $"[shadow] first character '{character.name}': {renderers} renderers, " +
+                    $"{matched} matched the _Shadow suffix" +
+                    (matched == 0 ? "  <-- NOTHING MATCHED, the convention may have changed" : ""));
+            }
+            catch (Exception) { }
+        }
+
         /// <summary>Why a character was kept visible past the cull distance.</summary>
         private enum Protection { None, Story, Dialogue, Unreadable }
 
@@ -216,6 +245,8 @@ namespace Lumen.Tuning
             {
                 CharacterRenderers.FindRedundant(renderers, _redundant,
                     LumenConfig.RemoveShadowProxies.Value);
+
+                ReportShadowMatch(character, renderers.Length, _redundant.Count);
             }
 
             for (int i = 0; i < renderers.Length; i++)

@@ -31,8 +31,16 @@ namespace Lumen.Diagnostics
 
         private const int CornerRadius = 8;
 
+        /// <summary>
+        /// Width of the selected-row stripe. Must stay well short of <see cref="PadX"/>,
+        /// where the labels begin: a marker that overlaps the text produces a one-frame
+        /// doubling of that row while the selection moves.
+        /// </summary>
+        private const float StripeWidth = 4f;
+
         private GameObject _root;
         private RectTransform _panel;
+        private RectTransform _highlights;
 
         private Image _background, _border, _headerBand, _headerRule, _footerRule;
         private TextMeshProUGUI _wordmark, _version, _fps, _fpsUnit, _stats, _footer;
@@ -146,6 +154,10 @@ namespace Lumen.Diagnostics
 
             BuildHeader();
 
+            // Every row selection marker lives in here, and nothing else does. They are
+            // created before any text, so they are contiguous and sit behind it.
+            _highlights = Rect(_panel, "Highlights", Vector2.zero, new Vector2(Width, height));
+
             float y = -HeaderHeight;
             section = null;
 
@@ -214,8 +226,14 @@ namespace Lumen.Diagnostics
         {
             var widgets = new RowWidgets();
 
-            var highlight = Rect(_panel, "Highlight", new Vector2(2f, y), new Vector2(Width - 4f, RowHeight));
-            widgets.Highlight = AddImage(highlight, _pill, Color.clear);
+            // A stripe at the left edge, well clear of the label at PadX. Its width is the
+            // part that matters: see RefreshRow for why it must not reach the text.
+            //
+            // Solid rather than the rounded sprite, because a nine-sliced rounded corner
+            // smears when the rect is narrower than the corner it is trying to draw.
+            var highlight = Rect(_highlights, "Highlight", new Vector2(2f, y),
+                new Vector2(StripeWidth, RowHeight));
+            widgets.Highlight = AddImage(highlight, _solid, Color.clear);
 
             widgets.Label = Label(_panel, "Label", new Vector2(PadX, y), new Vector2(250f, RowHeight),
                 row.Label, 14f, FontStyles.Normal, Color.white, TextAlignmentOptions.Left);
@@ -351,6 +369,12 @@ namespace Lumen.Diagnostics
                 var widgets = _rows[i];
                 if (widgets.TrackBackground != null)
                     widgets.TrackBackground.color = new Color(theme.Ink.r, theme.Ink.g, theme.Ink.b, 0.12f);
+
+                // The selection marker and the row label are only painted when the
+                // selection moves, which is right every frame but wrong when the palette
+                // underneath them changes. Forgetting the recorded state makes the next
+                // refresh paint them again in the new colours.
+                widgets.LastSelected = -1;
             }
         }
 
@@ -359,11 +383,21 @@ namespace Lumen.Diagnostics
             int selectedFlag = selected ? 1 : 0;
             if (widgets.LastSelected != selectedFlag)
             {
-                widgets.Highlight.color = selected
-                    ? new Color(theme.Accent.r, theme.Accent.g, theme.Accent.b, 0.10f)
-                    : Color.clear;
-
+                // A stripe down the left edge rather than a wash across the row.
+                //
+                // The wash flickered: for one frame while the selection moved, a row's text
+                // appeared twice, offset. It was chased through a dozen variations. It is
+                // not the font atlas, not hierarchy order, not the mesh rebuild, not screen
+                // tearing and not the canvas alpha. What every variation agreed on is the
+                // boundary: a marker that changes AND overlaps the row's text flickers, and
+                // one that does not overlap it never does.
+                //
+                // The mechanism was never found. This is a fix by elimination, so the thing
+                // that matters if it is ever revisited is the geometry, not the colour:
+                // keep the marker clear of the text.
+                widgets.Highlight.color = selected ? theme.Accent : Color.clear;
                 widgets.Label.color = selected ? theme.Ink : theme.InkDim;
+
                 widgets.LastSelected = selectedFlag;
             }
 

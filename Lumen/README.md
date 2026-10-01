@@ -93,6 +93,10 @@ If a problem persists, please open an
 [issue](https://github.com/jfraygit/Neonworks/issues) with your `BepInEx\LogOutput.log`
 attached.
 
+## What Changed
+
+Every version, and what it fixed, is in the [changelog](CHANGELOG.md).
+
 ## Thanks
 
 - **[@master63dotcom](https://github.com/master63dotcom)** spotted that turning the
