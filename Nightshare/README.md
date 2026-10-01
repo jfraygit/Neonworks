@@ -74,6 +74,34 @@ dotnet build src/Nightshare.Plugin/Nightshare.Plugin.csproj /p:NivalisDir="D:\Ga
 
 The build drops the plugin straight into the game's `BepInEx\plugins\Nightshare\`.
 
+## Trying it alone
+
+The other player can be a console program. A second copy of the game is not required to
+see whether a body appears.
+
+`Nightshare.Puppet` joins as a guest. It fingerprints the local install the same way the
+plugin does, and walks a circle around the host. It does not ask for the save. A save
+request would make the host write and send the live city, and a puppet has no world to
+load that file into. Players still replicate. The world does not, which is what a body
+test wants.
+
+Host in a loaded city (F9 by default), then from this folder:
+
+```
+dotnet run --project src/Nightshare.Puppet -- --name Puppet
+```
+
+The first position the host sends is the centre of the walk. Until one arrives the puppet
+waits, rather than pacing the origin. `--x`, `--y` and `--z` skip that wait. `--endpoint`
+defaults to `127.0.0.1:7777`, the plugin's default.
+
+```
+dotnet test tests/Nightshare.Tests/Nightshare.Tests.csproj
+```
+
+covers the same walk over loopback, with no game running. Building the puppet does not
+copy anything into the game. Building the plugin project does.
+
 ## How It Is Put Together
 
 `Nightshare.Core` is plain .NET with **no Unity or BepInEx dependency**: the wire protocol,

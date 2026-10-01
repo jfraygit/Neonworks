@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nightshare.Core\Nightshare.Core.csproj" />
+    <ProjectReference Include="..\..\src\Nightshare.Puppet\Nightshare.Puppet.csproj" />
   </ItemGroup>
 
 </Project>

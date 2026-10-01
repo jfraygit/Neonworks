@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The fake peer the rest of the project already talks about.
+
+    A console guest. It speaks the real session and the real transport, and it has no
+    Unity, BepInEx or game reference, so it cannot copy a plugin into the install and it
+    cannot touch a save. The plugin project is the one that does that; do not build it
+    from here.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Nightshare.Puppet</AssemblyName>
+    <RootNamespace>Nightshare.Puppet</RootNamespace>
+    <Version>$(NightshareVersion)</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Nightshare.Core\Nightshare.Core.csproj" />
+  </ItemGroup>
+
+</Project>
