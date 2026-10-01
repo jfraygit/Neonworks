@@ -1,4 +1,4 @@
-# Nightshare
+![Nightshare](../docs/nightshare.png)
 
 Co-op multiplayer for **Nivalis Nights**.
 
@@ -40,25 +40,20 @@ do it. One shared place that only moves when both are in it is the entire point.
 
 Honest status, since the above describes an intention and not a finished thing.
 
-**Working, and verified in game:**
+![Phase 1: Foundations, complete](../docs/phase1.png)
 
-- Two copies connect, handshake, and refuse to talk if the mod, protocol or game build
-  differ
-- A guest joins and loads the host's world, arriving in the host's zone
-- One shared clock. The host owns time and a guest is corrected to it
-- Both players see each other as visible, animated characters that walk and run
-- Nobody sleeps until everybody is at a bed, with an on-screen prompt
-- Pausing as the host pauses the guest's world too, and says so on screen
+![Phase 2: Two Players, One City, in progress](../docs/phase2.png)
 
-**Not built yet:**
+### Phase 3 And Beyond
 
-- **NPC replication.** Each side currently simulates its own crowd, so the two players do
-  not see the same people walking around. This is the largest remaining piece
-- Interactables, shops and anything transactional
-- Working at the host's businesses
-- Character customisation for the guest
-- A lobby. Joining is currently driven by config and hotkeys
-- Steam networking. Only direct TCP works today
+**Shared crowds are the next big piece.** Right now each side simulates its own people, so
+you and your host do not see the same characters walking around. Everything you can
+interact with lives there too: shops, doors, transactions, and anything where two players
+touching the same thing has to resolve sensibly.
+
+After that comes the part the mod is actually for: **working at the host's businesses**,
+guest character customisation, and the systems that make visiting someone's city worth
+doing.
 
 ## Building It
 

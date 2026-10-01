@@ -1,4 +1,4 @@
-# Neonworks
+![Neonworks](docs/neonworks.png)
 
 Mods for **Nivalis Nights**.
 
@@ -13,6 +13,8 @@ visible pop-in for more.
 **[Download and read more](Lumen/)** · [Releases](https://github.com/jfraygit/Neonworks/releases)
 
 ## [Nightshare](Nightshare/) — Co-op Multiplayer
+
+![Nightshare](docs/nightshare.png)
 
 Two people in one city. You visit someone's save and build a life in it alongside them.
 
