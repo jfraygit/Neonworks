@@ -140,110 +140,14 @@ namespace Nightshare.Core.Protocol
         }
     }
 
-    /// <summary>
-    /// One manager's save packet, verbatim from the game's own <c>ISaveWriter</c>.
-    /// <see cref="PacketGuid"/> is the game's <c>ISavePacket.Guid</c>.
-    /// </summary>
-    /// <remarks>
-    /// Packet ids are opaque strings, not GUIDs. Several of the game's own are not
-    /// parseable as a <c>System.Guid</c> (<c>Guid_PLAYER_MANAGER_SAVE</c>, <c>AI-Ai-ai</c>
-    /// and others with non-hex characters). Never call Guid.Parse on one.
-    /// </remarks>
-    public sealed class ManagerPacketV1
-    {
-        public string PacketGuid { get; set; }
-        public string ManagerTypeName { get; set; }
-        public byte[] Payload { get; set; }
-
-        public byte[] Serialise()
-        {
-            using var w = new NetWriter(MessageType.ManagerPacketV1);
-            w.Write(PacketGuid).Write(ManagerTypeName).WriteBytes(Payload);
-            return w.ToArray();
-        }
-
-        public static ManagerPacketV1 Parse(NetReader r)
-        {
-            var m = new ManagerPacketV1
-            {
-                PacketGuid = r.ReadString(),
-                ManagerTypeName = r.ReadString(),
-                Payload = r.ReadBytes(),
-            };
-            r.ExpectConsumed();
-            return m;
-        }
-    }
-
-    /// <summary>
-    /// A client telling the host it is ready to receive the world.
-    /// <para>
-    /// <b>The snapshot cannot be sent at handshake time.</b> A client connects from the
-    /// main menu, long before it loads a save, and at that point none of its managers
-    /// exist: a snapshot sent then finds nothing to apply to and is silently discarded.
-    /// Measured, 16 of 17 packets skipped with "no such manager here". The client asks
-    /// only once its own world is up.
-    /// </para>
-    /// </summary>
-    public sealed class WorldSnapshotRequestV1
-    {
-        /// <summary>How many managers the client can see, for the host's log.</summary>
-        public int LocalManagerCount { get; set; }
-
-        public byte[] Serialise()
-        {
-            using var w = new NetWriter(MessageType.WorldSnapshotRequestV1);
-            w.Write(LocalManagerCount);
-            return w.ToArray();
-        }
-
-        public static WorldSnapshotRequestV1 Parse(NetReader r)
-        {
-            var m = new WorldSnapshotRequestV1 { LocalManagerCount = r.ReadInt32() };
-            r.ExpectConsumed();
-            return m;
-        }
-    }
-
-    /// <summary>
-    /// Announces a world snapshot. The <see cref="PacketCount"/> ManagerPacketV1 messages
-    /// that follow make up the snapshot, in order.
-    /// <para>
-    /// Sent as a header rather than one giant message so the receiver can report progress
-    /// and can tell "still arriving" from "the host stopped sending". A snapshot is over a
-    /// megabyte and takes visible time.
-    /// </para>
-    /// </summary>
-    public sealed class WorldSnapshotV1
-    {
-        public int PacketCount { get; set; }
-        public int TotalBytes { get; set; }
-
-        /// <summary>Host clock at the moment the snapshot was taken.</summary>
-        public int TotalGameSeconds { get; set; }
-        public int GameplayGameDay { get; set; }
-
-        public byte[] Serialise()
-        {
-            using var w = new NetWriter(MessageType.WorldSnapshotV1);
-            w.Write(PacketCount).Write(TotalBytes)
-             .Write(TotalGameSeconds).Write(GameplayGameDay);
-            return w.ToArray();
-        }
-
-        public static WorldSnapshotV1 Parse(NetReader r)
-        {
-            var m = new WorldSnapshotV1
-            {
-                PacketCount = r.ReadInt32(),
-                TotalBytes = r.ReadInt32(),
-                TotalGameSeconds = r.ReadInt32(),
-                GameplayGameDay = r.ReadInt32(),
-            };
-            r.ExpectConsumed();
-            return m;
-        }
-    }
+    // ManagerPacketV1, WorldSnapshotRequestV1 and WorldSnapshotV1 lived here.
+    //
+    // They carried the world as one message per manager, for a client to apply to its
+    // already running game. That approach is gone. A guest is sent the host's SAVE FILE
+    // and the game loads it, which is the path the developers test and the only one that
+    // brings the story, the people and the UI up agreeing with each other.
+    //
+    // Their numbers, 20 to 22, stay spent. See MessageType.
 
     /// <summary>
     /// Periodic state fingerprint for the desync detector. Peers exchange these and

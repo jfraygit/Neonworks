@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 
 namespace Nightshare.Replication
@@ -10,60 +11,64 @@ namespace Nightshare.Replication
     /// game's own flow that pause is released when the load finishes. Driving a load from
     /// inside a running world, which is what a guest joining does, leaves it held: the
     /// loading screen drops, the player can walk around, and the clock never moves again.
+    /// A guest's clock appeared to work only because the host's sync was force-adding time
+    /// to it every second; leaving the session stopped that and the world froze.
     /// </para>
     /// <para>
-    /// It took a while to find because every obvious suspect was innocent. Nightshare's own
-    /// pause lock was being taken and released correctly, and the log said so. The thing
-    /// that actually named it was the game's own <c>OverrideableBool.LogOwners()</c>:
-    /// <code>
-    /// Lock owners (1): ------ Managers (Nivalis.SerializationManager)
-    /// </code>
-    /// A pause is reference counted across owners, so releasing ours resumed nothing while
-    /// the serialiser still held one. <b>Releasing your own lock is not the same as the
-    /// world running again</b>, and only asking the game who else is holding it can tell
-    /// the difference.
-    /// </para>
-    /// <para>
-    /// <b>Why releasing someone else's lock is defensible here.</b> Only once the loading
-    /// screen is down and the local player exists and the world has settled. At that point
-    /// a load-time pause is stale by definition: the load it belonged to is over. The
-    /// alternative is a guest sitting in a city where time never passes.
+    /// <b>Releasing someone else's lock is defensible only because of the window.</b>
+    /// Nothing is touched unless it was taken <i>during a load</i> and is still held after
+    /// that load has visibly ended, at which point it is stale by definition. Locks taken
+    /// at any other time belong to whoever took them.
     /// </para>
     /// </summary>
     internal static class LoadPauseGuard
     {
-        private static Nivalis.OverrideableBool.OverrideLock _serialiserLock;
-        private static bool _warnedNotTracked;
+        private sealed class Held
+        {
+            internal Nivalis.OverrideableBool.OverrideLock Handle;
+            internal string Owner;
+        }
+
+        private static readonly List<Held> Taken = new List<Held>();
+        private static bool _loading;
+
+        /// <summary>A load has started. Anything that pauses time from here is suspect.</summary>
+        public static void LoadStarted()
+        {
+            _loading = true;
+            Taken.Clear();
+        }
+
+        /// <summary>Drop everything, for example on leaving a session.</summary>
+        public static void Forget()
+        {
+            _loading = false;
+            Taken.Clear();
+        }
 
         /// <summary>
-        /// Remember a lock taken against the time-of-day pause.
+        /// Remember a lock taken against the time-of-day pause during a load.
         /// <para>
-        /// Filtered hard: <c>Override</c> is how every gate in the game is held, including
-        /// player movement and menu shortcuts, so this runs on a hot path and must do as
-        /// little as possible for the calls it does not care about.
+        /// <c>Override</c> is how every gate in the game is held, including player movement
+        /// and menu shortcuts, so this runs on a hot path. The <c>_loading</c> check is
+        /// first precisely because it is false almost always and costs nothing.
         /// </para>
         /// </summary>
         public static void Record(Nivalis.OverrideableBool target,
                                   Il2CppSystem.Object owner,
                                   Nivalis.OverrideableBool.OverrideLock handle)
         {
-            if (target == null || handle == null || owner == null) return;
+            if (!_loading || target == null || handle == null) return;
 
             try
             {
                 var manager = Nivalis.TimeOfDayManager.Instance;
                 if (manager == null) return;
 
-                // Only the clock's own pause is interesting.
                 var timePause = manager.IsPausedOverrideableBool;
                 if (timePause == null || target.Pointer != timePause.Pointer) return;
 
-                // Only the serialiser's. Ours is managed in ClockReplicator, and anything
-                // else holding time still is doing it for a reason we have no business
-                // overruling.
-                if (owner.TryCast<Nivalis.SerializationManager>() == null) return;
-
-                _serialiserLock = handle;
+                Taken.Add(new Held { Handle = handle, Owner = Describe(owner) });
             }
             catch (Exception)
             {
@@ -71,69 +76,75 @@ namespace Nightshare.Replication
             }
         }
 
-        /// <summary>Forget any tracked lock, for example when leaving a session.</summary>
-        public static void Forget() => _serialiserLock = null;
+        private static string Describe(Il2CppSystem.Object owner)
+        {
+            if (owner == null) return "null";
+            try { return owner.GetIl2CppType()?.FullName ?? "unknown"; }
+            catch (Exception) { return "unknown"; }
+        }
 
         /// <summary>
-        /// If the world is still paused by the serialiser after a load has visibly
-        /// finished, let it go. Returns true if it released something.
+        /// The load has visibly finished. Let go of anything it left holding time still.
+        /// <para>
+        /// Reports through the caller's log rather than the game's <c>LogOwners</c>, because
+        /// that writes to Unity's log and two instances share one of those: a guest's copy
+        /// of it is silently discarded, which is exactly the instance whose clock is stuck.
+        /// </para>
         /// </summary>
-        public static bool ReleaseIfStuck(Action<string> log)
+        public static void ReleaseStaleLoadPauses(Action<string> log)
         {
+            _loading = false;
+
             try
             {
                 var manager = Nivalis.TimeOfDayManager.Instance;
-                if (manager == null || !manager.IsPaused) return false;
+                if (manager == null) return;
 
-                if (_serialiserLock == null || _serialiserLock.IsReleased)
+                if (!manager.IsPaused)
                 {
-                    // Paused by somebody we never saw take it. Say who, rather than
-                    // silently leaving the player in a stopped world.
-                    if (!_warnedNotTracked)
+                    Taken.Clear();
+                    return;
+                }
+
+                if (Taken.Count == 0)
+                {
+                    log("Clock: still paused after the load, and nothing took a time pause " +
+                        "during it. The owner is something this guard cannot see.");
+                    return;
+                }
+
+                var released = 0;
+                foreach (var held in Taken)
+                {
+                    try
                     {
-                        _warnedNotTracked = true;
-                        log("Clock: the world is still paused and no tracked load lock " +
-                            "explains it. Owners follow.");
-                        try { manager.IsPausedOverrideableBool?.LogOwners(); } catch (Exception) { }
+                        if (held.Handle == null || held.Handle.IsReleased) continue;
+                        held.Handle.Release();
+                        released++;
+                        log($"Clock: released a load pause held by {held.Owner}");
                     }
-                    return false;
+                    catch (Exception ex)
+                    {
+                        log($"Clock: could not release {held.Owner}'s load pause: {ex.Message}");
+                    }
                 }
 
-                _serialiserLock.Release();
-                _serialiserLock = null;
-
-                var nowPaused = manager.IsPaused;
-                log($"Clock: released the serialiser's leftover load pause; " +
-                    $"still paused: {nowPaused}");
-
-                if (nowPaused)
-                {
-                    try { manager.IsPausedOverrideableBool?.LogOwners(); } catch (Exception) { }
-                }
-
-                return true;
+                Taken.Clear();
+                log($"Clock: {released} stale load pause(s) released; still paused: {manager.IsPaused}");
             }
             catch (Exception ex)
             {
-                log($"Clock: could not release the load pause: {ex.Message}");
-                return false;
+                log($"Clock: releasing load pauses threw: {ex.Message}");
             }
         }
     }
 
     /// <summary>
-    /// Watches every override taken on an <see cref="Nivalis.OverrideableBool"/> so
-    /// <see cref="LoadPauseGuard"/> can recognise the one the serialiser takes while loading.
-    /// <para>
-    /// Patched at <c>OverrideableBool.Override</c> rather than
-    /// <c>TimeOfDayManager.Pause</c> because that is the single point every route to a pause
-    /// goes through, including whatever the serialiser uses internally. Patching the
-    /// convenience wrapper instead would miss a caller that skipped it.
-    /// </para>
+    /// <c>Override(owner)</c>, the overload that returns the lock.
     /// </summary>
     [HarmonyPatch(typeof(Nivalis.OverrideableBool), nameof(Nivalis.OverrideableBool.Override),
                   new[] { typeof(Il2CppSystem.Object) })]
-    internal static class OverrideableBoolOverridePatch
+    internal static class OverrideReturningPatch
     {
         [HarmonyPostfix]
         private static void Postfix(Nivalis.OverrideableBool __instance,
@@ -141,6 +152,29 @@ namespace Nightshare.Replication
                                     Nivalis.OverrideableBool.OverrideLock __result)
         {
             LoadPauseGuard.Record(__instance, debugOwner, __result);
+        }
+    }
+
+    /// <summary>
+    /// <c>Override(owner, out lock)</c>.
+    /// <para>
+    /// <b>Both overloads must be patched.</b> A first attempt covered only the returning one
+    /// and caught nothing at all: the guard reported that no tracked lock explained a world
+    /// that was demonstrably still paused. Which overload a caller happens to use is not
+    /// something to guess at from the outside.
+    /// </para>
+    /// </summary>
+    [HarmonyPatch(typeof(Nivalis.OverrideableBool), nameof(Nivalis.OverrideableBool.Override),
+                  new[] { typeof(Il2CppSystem.Object), typeof(Nivalis.OverrideableBool.OverrideLock) },
+                  new[] { ArgumentType.Normal, ArgumentType.Out })]
+    internal static class OverrideOutParamPatch
+    {
+        [HarmonyPostfix]
+        private static void Postfix(Nivalis.OverrideableBool __instance,
+                                    Il2CppSystem.Object debugOwner,
+                                    ref Nivalis.OverrideableBool.OverrideLock interactabilityLock)
+        {
+            LoadPauseGuard.Record(__instance, debugOwner, interactabilityLock);
         }
     }
 }

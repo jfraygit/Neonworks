@@ -44,6 +44,129 @@ namespace Nightshare
         // single config directory and could not otherwise be given different roles.
         private static StartupMode EffectiveMode => CommandLineOverrides.Mode ?? Config.Mode.Value;
         private static string EffectiveEndpoint => CommandLineOverrides.Endpoint ?? Config.Endpoint.Value;
+
+        // ---------------------------------------------------------------- what the menu asks
+
+        /// <summary>A session at a glance, for the Nightshare menu to describe.</summary>
+        public struct Summary
+        {
+            public bool Active;
+            public bool IsHost;
+            public int PeerCount;
+            public string HostName;
+            public string Endpoint;
+
+            /// <summary>Mid-handshake, so the menu can say so rather than looking idle.</summary>
+            public bool Connecting;
+
+            /// <summary>
+            /// The last thing that went wrong, for the menu to show. Cleared when something
+            /// is tried again, so it describes the most recent attempt and not a stale one.
+            /// </summary>
+            public string LastError;
+        }
+
+        private string _lastSessionError;
+
+        public Summary SessionSummary
+        {
+            get
+            {
+                var s = new Summary
+                {
+                    Endpoint = EffectiveEndpoint,
+                    HostName = "the host",
+                    LastError = _lastSessionError,
+                };
+
+                try
+                {
+                    if (_session == null) return s;
+
+                    s.Connecting = _session.State is SessionState.Connecting
+                                                  or SessionState.Handshaking;
+
+                    if (!_session.IsActive) return s;
+
+                    s.Active = true;
+                    s.IsHost = _session.IsHost;
+                    s.PeerCount = _session.Peers.Count;
+
+                    foreach (var p in _session.Peers)
+                    {
+                        if (!p.IsHost) continue;
+                        s.HostName = p.Name;
+                        break;
+                    }
+                }
+                catch (Exception) { }
+
+                return s;
+            }
+        }
+
+        /// <summary>
+        /// Whether this machine is standing in a world. The menu gates hosting and joining
+        /// on it, because both need one and a session started without one is where a long
+        /// run of bugs came from.
+        /// </summary>
+        public bool HasWorld
+        {
+            get
+            {
+                try { return _transforms.LocalPlayerObject != null; }
+                catch (Exception) { return false; }
+            }
+        }
+
+        /// <summary>The address half of the endpoint, for the menu to show and edit.</summary>
+        public string LobbyAddress => EndpointText.Address(EffectiveEndpoint);
+
+        /// <summary>The port half, or the default when the endpoint is malformed.</summary>
+        public int LobbyPort => EndpointText.Port(EffectiveEndpoint);
+
+        public void SetLobbyAddress(string address) => SetEndpoint(address, LobbyPort);
+
+        public void SetLobbyPort(int port) => SetEndpoint(LobbyAddress, port);
+
+        /// <summary>
+        /// Write the endpoint back to config so it survives a restart.
+        /// <para>
+        /// A command line override still wins while the process lives, since the launch
+        /// scripts rely on it, but the typed value is what is there next time.
+        /// </para>
+        /// </summary>
+        private void SetEndpoint(string address, int port)
+        {
+            if (string.IsNullOrWhiteSpace(address)) return;
+
+            // REFUSE AN ADDRESS NOBODY CAN CONNECT TO.
+            //
+            // A half-typed "7" is a perfectly valid IPv4 address as far as the framework is
+            // concerned: it parses to 0.0.0.7. Stored, it then sat in the config across
+            // restarts and broke every attempt to connect, with nothing on screen to say
+            // why. Rejecting it at the point it is typed is the only place the player still
+            // has the context to fix it.
+            if (!EndpointText.LooksConnectable(address))
+            {
+                _lastSessionError = $"'{address}' is not an address anyone can reach.";
+                LogWarning($"Lobby: refused the address '{address}'.");
+                return;
+            }
+
+            _lastSessionError = null;
+            var endpoint = EndpointText.Format(address, port);
+
+            try
+            {
+                Config.Endpoint.Value = endpoint;
+                Log($"Lobby: endpoint set to {endpoint}");
+            }
+            catch (Exception ex)
+            {
+                LogError($"Could not save the endpoint: {ex.Message}");
+            }
+        }
         private static string EffectivePlayerName => CommandLineOverrides.PlayerName ?? Config.PlayerName.Value;
         private static bool EffectiveRecordTraces => CommandLineOverrides.RecordTraces ?? Config.RecordTraces.Value;
 
@@ -107,6 +230,22 @@ namespace Nightshare
             //
             // Connecting only once a world exists deletes the whole class instead, and it
             // is what the lobby flow makes structural: see docs/joining-a-session.md.
+            // BEFORE THE GATE, DELIBERATELY.
+            //
+            // Everything below needs a world. The loading-screen hold is the one thing that
+            // must keep running when there is not one, because during a load the local
+            // player is destroyed and this gate closes. Leaving the timeout on the far side
+            // of it means a load that never finishes holds the screen up forever, which is
+            // the worst bug this mod has had.
+            TickLoadingScreenHold(deltaTime);
+
+            // Also before the gate. The menu's whole job is to be reachable, including at
+            // the main menu where it explains that a save has to be loaded first.
+            TickDiscovery(deltaTime);
+
+            try { _lobby.Tick(); }
+            catch (Exception ex) { LogError($"Lobby menu threw: {ex.Message}"); }
+
             if (!WorldIsLoaded) return;
 
             HandleStartup();
@@ -181,9 +320,14 @@ namespace Nightshare
             try { _clock.Reset(); } catch { }
             try { _session?.Dispose(); } catch { }
 
-            // Both panels are DontDestroyOnLoad, so without this they survive the plugin.
+            // These are DontDestroyOnLoad, so without this they survive the plugin.
             try { _sleepPrompt.Destroy(); } catch { }
             try { _pausedNotice.Destroy(); } catch { }
+            try { _lobby.Destroy(); } catch { }
+
+            // Sockets, so these leak rather than merely linger if they are not closed.
+            try { _beacon.Dispose(); } catch { }
+            try { _browser.Dispose(); } catch { }
         }
 
         /// <summary>
@@ -204,9 +348,39 @@ namespace Nightshare
 
         // ---------------------------------------------------------------- session control
 
+        /// <summary>
+        /// Turn a socket error into something worth putting on screen.
+        /// <para>
+        /// The framework's wording describes what the operating system refused, not what
+        /// the player should do. "The requested address is not valid in its context" is
+        /// accurate and useless.
+        /// </para>
+        /// </summary>
+        private static string Readable(string why)
+        {
+            if (string.IsNullOrEmpty(why)) return "Something went wrong.";
+
+            if (why.Contains("already in use") || why.Contains("only one usage"))
+                return "That port is already in use. Try another.";
+
+            if (why.Contains("not valid in its context"))
+                return "That address cannot be used. Check it, or leave it as 127.0.0.1.";
+
+            if (why.Contains("refused") || why.Contains("actively refused"))
+                return "Nobody is hosting there yet.";
+
+            if (why.Contains("timed out") || why.Contains("did not properly respond"))
+                return "No answer. Check the address, or that they are hosting.";
+
+            return why;
+        }
+
         public void StartHosting()
         {
             if (IsBusy()) return;
+
+            // Cleared on every attempt, so what is on screen is about this try.
+            _lastSessionError = null;
 
             Log($"Hosting on {EffectiveEndpoint} as '{EffectivePlayerName}'");
             BeginRecording(isHost: true);
@@ -216,6 +390,8 @@ namespace Nightshare
         public void StartJoining()
         {
             if (IsBusy()) return;
+
+            _lastSessionError = null;
 
             Log($"Joining {EffectiveEndpoint} as '{EffectivePlayerName}'");
             BeginRecording(isHost: false);
@@ -228,13 +404,7 @@ namespace Nightshare
 
             // Hand the clock back first, or a client that leaves is frozen in time forever
             // with no obvious cause.
-            _clock.Reset();
-            Replication.LoadPauseGuard.Forget();
-            _avatars.Clear();
-            _transforms.Reset();
-            _worldRequested = false;
-            _worldReadyCheckTimer = 0f;
-            _zones.Reset();
+            ResetSessionState();
             _session.Leave();
 
             try { _recorder?.Dispose(); } catch { }
@@ -301,46 +471,19 @@ namespace Nightshare
             // asks once its own world is loaded; see WorldSnapshotRequestV1.
         }
 
-        /// <summary>
-        /// Ship the world to a joining player: a header, then one message per manager.
-        /// <para>
-        /// Reliable, and deliberately not batched into one giant message. Over a megabyte
-        /// arrives visibly slowly, and per-packet messages let the receiver report progress
-        /// and distinguish "still arriving" from "the host stopped".
-        /// </para>
-        /// </summary>
-        private void SendWorldSnapshot(RemotePeer peer)
-        {
-            var entries = WorldSnapshot.Build(Log);
-            if (entries.Count == 0)
-            {
-                Log("Snapshot: nothing to send. Is a save loaded?");
-                return;
-            }
-
-            var total = 0;
-            foreach (var e in entries) total += e.Payload.Length;
-
-            _session.Send(peer.Id, new WorldSnapshotV1
-            {
-                PacketCount = entries.Count,
-                TotalBytes = total,
-                TotalGameSeconds = ReadGameSeconds(),
-                GameplayGameDay = ReadGameDay(),
-            }.Serialise());
-
-            foreach (var e in entries)
-            {
-                _session.Send(peer.Id, new ManagerPacketV1
-                {
-                    PacketGuid = e.PacketGuid,
-                    ManagerTypeName = e.ManagerTypeName,
-                    Payload = e.Payload,
-                }.Serialise());
-            }
-
-            Log($"Snapshot: sent {entries.Count} packet(s), {total:N0} bytes to {peer.Name}");
-        }
+        // THE WORLD SNAPSHOT IS GONE. DO NOT BRING IT BACK.
+        //
+        // A joining guest used to be sent the world as one message per manager, around
+        // thirty of them, which it applied to its running game. It never worked properly.
+        // Managers have a two-phase init that had to be discovered, several packets failed
+        // to round-trip, the quest UI stayed stale afterwards, and NPCs ended up in states
+        // the game could not have produced. Every fix revealed another system that needed
+        // the same treatment, because the set of things a world is made of is not knowable
+        // from outside.
+        //
+        // Sending the host's SAVE FILE and letting the game load it replaced all of it. The
+        // game already knows how to turn that file into a world; it does it every time
+        // anyone presses Continue. See docs/joining-a-session.md.
 
         // ---------------------------------------------------------------- snapshot request
 
@@ -416,7 +559,7 @@ namespace Nightshare
             var who = string.IsNullOrEmpty(request.PlayerName) ? from.ToShortString() : request.PlayerName;
             Log($"Save: {who} is ready, saving so they can load this world");
 
-            SaveTransferV1 transfer;
+            SaveTransferV2 transfer;
             try { transfer = SaveTransfer.TryCapture(Log); }
             catch (Exception ex)
             {
@@ -442,7 +585,7 @@ namespace Nightshare
         }
 
         /// <summary>The host's world arrived. Write it down and load it.</summary>
-        private void OnSaveReceived(SaveTransferV1 msg)
+        private void OnSaveReceived(SaveTransferV2 msg)
         {
             Log($"Save: received {msg.Data?.Length ?? 0:N0} bytes from the host");
 
@@ -460,6 +603,14 @@ namespace Nightshare
                 // Report where this load actually puts us, once it has finished.
                 _arrivalPending = true;
                 _arrivalSettle = 0f;
+
+                // HELD UNTIL THE LOAD FINISHES, NOT APPLIED NOW.
+                //
+                // Loading from inside a running world does not restore the saved player
+                // transform; the game places the player at the zone's arrival point. So the
+                // host's position is re-applied afterwards, and it has to outlive the load
+                // to do that.
+                _pendingArrival = msg;
             }
             catch (Exception) { }
 
@@ -472,55 +623,6 @@ namespace Nightshare
             {
                 LogError($"Save: applying threw: {ex}");
             }
-        }
-
-        // ---------------------------------------------------------------- snapshot receipt
-
-        private WorldSnapshotV1 _incomingSnapshot;
-        private readonly List<ManagerPacketV1> _incomingPackets = new List<ManagerPacketV1>();
-
-        private void BeginReceivingSnapshot(WorldSnapshotV1 header)
-        {
-            _incomingSnapshot = header;
-            _incomingPackets.Clear();
-
-            Log($"Snapshot: incoming, {header.PacketCount} packet(s), " +
-                $"{header.TotalBytes:N0} bytes, host is on day {header.GameplayGameDay}");
-        }
-
-        private void ReceiveSnapshotPacket(ManagerPacketV1 packet)
-        {
-            if (_incomingSnapshot == null)
-            {
-                Log($"Snapshot: ignoring {packet.ManagerTypeName}, no header arrived first");
-                return;
-            }
-
-            _incomingPackets.Add(packet);
-
-            if (_incomingPackets.Count < _incomingSnapshot.PacketCount) return;
-
-            var received = 0;
-            foreach (var p in _incomingPackets) received += p.Payload?.Length ?? 0;
-
-            Log($"Snapshot: complete, {_incomingPackets.Count} packet(s), {received:N0} bytes");
-            foreach (var p in _incomingPackets)
-                Log($"    {p.ManagerTypeName,-46} {p.Payload?.Length ?? 0,9:N0} b");
-
-            if (!Config.ApplyWorldSnapshot.Value)
-            {
-                Log("Snapshot: received but NOT applied (ApplyWorldSnapshot is off). " +
-                    "Players and the clock still replicate; the world does not.");
-            }
-            else
-            {
-                Log("Snapshot: applying. This overwrites the local world.");
-                try { WorldSnapshotApplier.Apply(_incomingPackets, Log); }
-                catch (Exception ex) { LogError($"Apply threw: {ex}"); }
-            }
-
-            _incomingSnapshot = null;
-            _incomingPackets.Clear();
         }
 
         // ---------------------------------------------------------------- sleep prompt
@@ -559,6 +661,13 @@ namespace Nightshare
 
         private bool _arrivalPending;
         private float _arrivalSettle;
+        private string _arrivalWhat = "a load";
+
+        /// <summary>
+        /// The transfer whose arrival point still needs applying, or null. Only a join sets
+        /// this; an ordinary menu load has nowhere particular to be.
+        /// </summary>
+        private SaveTransferV2 _pendingArrival;
 
         /// <summary>
         /// A load has begun, from anywhere: the main menu, zone travel, or a guest adopting
@@ -571,34 +680,99 @@ namespace Nightshare
         /// player's position.
         /// </para>
         /// </summary>
-        public void OnLoadStarted()
+        public void OnLoadStarted(string saveName, bool fromTheGamesOwnMenu)
         {
             _arrivalPending = true;
             _arrivalSettle = 0f;
+
+            // CARRIED THROUGH TO THE ARRIVAL LINE ON PURPOSE.
+            //
+            // A session has several loads in it: the player's own save at the start, the
+            // join, zone travel, a menu load used as a control. They all produced an
+            // identical "arrived at" line, so reading one back meant counting loads and
+            // hoping. Saying which load this was removes the guess.
+            _arrivalWhat = fromTheGamesOwnMenu
+                ? $"the game's own menu load of '{saveName}'"
+                : $"an in-game load of '{saveName}'";
+
+            _gameplaySceneReady = false;
+
+            // Only a join needs the screen held. An ordinary load has no correction coming
+            // afterwards, so holding it would just make the game feel slower.
+            _holdingLoadingScreen = _pendingArrival != null;
+            _holdElapsed = 0f;
+
+            Replication.LoadPauseGuard.LoadStarted();
         }
 
-        /// <summary>Seconds to let the world settle after the loading screen drops.</summary>
-        private const float ArrivalSettleSeconds = 1.5f;
+        /// <summary>Seconds to let the world settle once the gameplay scene is up.</summary>
+        private const float ArrivalSettleSeconds = 1.0f;
 
         /// <summary>
-        /// Say where a guest actually came up, once, after loading the host's world.
+        /// Longest the loading screen is held waiting for a guest to be placed.
         /// <para>
-        /// <b>Deliberately not driven off <c>WorldIsLoaded</c>.</b> That reports true around
-        /// fifty milliseconds into a load, because the world being replaced still satisfies
-        /// it, so anything logged there describes the OLD position and is worse than silence.
-        /// The honest signal is the loading screen being down, plus a moment for the player
-        /// to be placed.
+        /// <b>A hold must always end.</b> Holding is a cosmetic improvement; a player stuck
+        /// behind a loading screen forever is the worst failure this mod has had, twice. If
+        /// placement has not happened by now, something is wrong and the right answer is to
+        /// show them the world anyway.
+        /// </para>
+        /// </summary>
+        private const float MaxArrivalHoldSeconds = 12f;
+
+        /// <summary>Set when the gameplay scene finishes loading. The real readiness signal.</summary>
+        private bool _gameplaySceneReady;
+
+        private bool _holdingLoadingScreen;
+        private float _holdElapsed;
+
+        /// <summary>True only while we are calling Hide ourselves, so the patch lets it pass.</summary>
+        private bool _releasingHold;
+
+        /// <summary>
+        /// Whether the loading screen should stay up. Read by the patch on
+        /// <c>LoadingScreenUI.Hide</c>.
+        /// <para>
+        /// A guest's arrival is a load, then a correction: the game puts them at the zone's
+        /// arrival point and we move them to the host. Letting the screen drop in between
+        /// shows two seconds of the wrong place and a teleport, which reads as a bug even
+        /// though it is working. Holding turns it into one transition.
+        /// </para>
+        /// </summary>
+        public bool ShouldHoldLoadingScreen() => _holdingLoadingScreen && !_releasingHold;
+
+        /// <summary>The gameplay scene is up. Called from the scene-loaded patch.</summary>
+        public void OnGameplaySceneLoaded() => _gameplaySceneReady = true;
+
+        /// <summary>
+        /// The deadline on the hold. Runs every frame whether or not there is a world,
+        /// because the case it guards against is there never being one.
+        /// </summary>
+        private void TickLoadingScreenHold(float deltaTime)
+        {
+            if (!_holdingLoadingScreen) return;
+
+            _holdElapsed += deltaTime;
+            if (_holdElapsed <= MaxArrivalHoldSeconds) return;
+
+            LogWarning($"Arrival: gave up holding the loading screen after " +
+                       $"{MaxArrivalHoldSeconds:0}s. Showing the world unplaced.");
+            ReleaseLoadingScreen();
+        }
+
+        /// <summary>
+        /// Say where a guest actually came up, and put them beside the host.
+        /// <para>
+        /// <b>Driven off the gameplay scene loading, not the loading screen.</b> It used to
+        /// wait for the screen to come down, which cannot work once we are the reason it is
+        /// still up. <c>WorldIsLoaded</c> is no good either: it reports true about fifty
+        /// milliseconds into a load, because the world being replaced still satisfies it.
         /// </para>
         /// </summary>
         private void ReportArrivalIfPending(float deltaTime)
         {
             if (!_arrivalPending) return;
 
-            bool screenUp;
-            try { screenUp = Nivalis.LoadingScreenUI.showing; }
-            catch (Exception) { screenUp = false; }
-
-            if (screenUp || _transforms.LocalPlayerObject == null)
+            if (!_gameplaySceneReady || _transforms.LocalPlayerObject == null)
             {
                 _arrivalSettle = 0f;
                 return;
@@ -608,16 +782,158 @@ namespace Nightshare
             if (_arrivalSettle < ArrivalSettleSeconds) return;
 
             _arrivalPending = false;
-            Log($"Load: arrived at {Replication.SaveTransfer.DescribeLocation()}");
+            Log($"Load: after {_arrivalWhat}, arrived at {Replication.SaveTransfer.DescribeLocation()}");
 
             // The load is visibly over, so any pause still held for it is stale. Without
             // this a guest lands in a city where the clock never moves again.
-            Replication.LoadPauseGuard.ReleaseIfStuck(Log);
+            Replication.LoadPauseGuard.ReleaseStaleLoadPauses(Log);
+
+            // Then put a joining guest where the host actually is, since the load did not.
+            if (_pendingArrival != null)
+            {
+                var arrival = _pendingArrival;
+                _pendingArrival = null;
+
+                try
+                {
+                    if (Replication.SaveTransfer.TryPlaceAtArrival(arrival, Log))
+                        Log($"Load: now at {Replication.SaveTransfer.DescribeLocation()}");
+                }
+                catch (Exception ex) { LogError($"Arrival placement threw: {ex.Message}"); }
+
+                // The clock is in the same position as the player was: the load did not
+                // restore it, and the ordinary sync only moves forward, so a guest that
+                // arrives ahead of the host never comes back on its own.
+                try
+                {
+                    _clock.ForceTo(arrival.TotalGameSeconds, "joined the host's world",
+                                   arrival.GameDay, arrival.Hour, arrival.Minute, arrival.Second);
+                }
+                catch (Exception ex) { LogError($"Arrival clock snap threw: {ex.Message}"); }
+            }
+
+            // Everything the player would have seen go wrong has now happened. Show them.
+            ReleaseLoadingScreen();
+        }
+
+        /// <summary>
+        /// Let the loading screen come down, hiding it ourselves since the game's own call
+        /// was refused while we were holding.
+        /// </summary>
+        private void ReleaseLoadingScreen()
+        {
+            if (!_holdingLoadingScreen) return;
+
+            _holdingLoadingScreen = false;
+            _holdElapsed = 0f;
+
+            try
+            {
+                // The flag is what lets our own Hide through the patch that blocks the
+                // game's. Cleared in a finally so a throw cannot wedge the screen up.
+                _releasingHold = true;
+                Nivalis.LoadingScreenUI.Instance?.Hide();
+                Log("Arrival: loading screen released");
+            }
+            catch (Exception ex)
+            {
+                LogError($"Arrival: could not hide the loading screen: {ex.Message}");
+            }
+            finally
+            {
+                _releasingHold = false;
+            }
         }
 
         // ---------------------------------------------------------------- paused notice
 
         private readonly UI.PausedNotice _pausedNotice = new UI.PausedNotice();
+
+        /// <summary>The Nightshare menu. Opening it is how a session is started or joined.</summary>
+        private readonly UI.LobbyController _lobby = new UI.LobbyController();
+
+        // ---------------------------------------------------------------- discovery
+
+        private readonly Core.Discovery.LobbyBeacon _beacon = new Core.Discovery.LobbyBeacon();
+        private readonly Core.Discovery.LobbyBrowser _browser = new Core.Discovery.LobbyBrowser();
+
+        /// <summary>Begin listening for sessions on the local network.</summary>
+        public void StartLookingForSessions()
+        {
+            try
+            {
+                _browser.Log = LogWarning;
+                _browser.ExpectedProtocol = ProtocolVersion.Current;
+                _browser.ExpectedModVersion = NightsharePlugin.Version;
+                _browser.ExpectedGameBuild = GameFingerprint.Current;
+                _browser.Start();
+            }
+            catch (Exception ex) { LogError($"Could not look for sessions: {ex.Message}"); }
+        }
+
+        public void StopLookingForSessions()
+        {
+            try { _browser.Stop(); } catch (Exception) { }
+        }
+
+        public void CollectFoundSessions(List<Core.Discovery.FoundLobby> into)
+        {
+            try { _browser.Snapshot(into); }
+            catch (Exception) { into.Clear(); }
+        }
+
+        /// <summary>
+        /// Keep the beacon and the browser turned over. Driven from the tick ahead of the
+        /// world gate, because finding a session is something you do before joining one and
+        /// the browser is useless if it only runs once you already have.
+        /// </summary>
+        private void TickDiscovery(float deltaTime)
+        {
+            try
+            {
+                var hosting = _session != null && _session.IsActive && _session.IsHost;
+
+                if (hosting && !_beacon.IsRunning)
+                {
+                    _beacon.Log = LogWarning;
+                    _beacon.Describe = DescribeSessionForBeacon;
+                    _beacon.Start();
+                }
+                else if (!hosting && _beacon.IsRunning)
+                {
+                    _beacon.Stop();
+                }
+
+                _beacon.Tick(deltaTime);
+                _browser.Tick(deltaTime);
+            }
+            catch (Exception ex) { LogError($"Discovery tick threw: {ex.Message}"); }
+        }
+
+        private Core.Discovery.LobbyBeaconV1 DescribeSessionForBeacon()
+        {
+            if (_session == null || !_session.IsActive || !_session.IsHost) return null;
+
+            return new Core.Discovery.LobbyBeaconV1
+            {
+                HostName = EffectivePlayerName,
+                Port = EndpointText.Port(EffectiveEndpoint),
+                ProtocolVersion = ProtocolVersion.Current,
+                ModVersion = NightsharePlugin.Version,
+                GameBuildId = GameFingerprint.Current,
+                PlayerCount = _session.Peers.Count,
+                SessionId = _session.SessionId ?? "",
+            };
+        }
+
+        /// <summary>Open or close the menu. Bound to a hotkey by the runner.</summary>
+        public void ToggleLobbyMenu() => _lobby.Toggle();
+
+        /// <summary>
+        /// True while the menu has the keyboard, so the runner's other hotkeys stand down.
+        /// Typing a port would otherwise also be firing join and leave.
+        /// </summary>
+        public bool LobbyCapturesInput => _lobby.CapturesInput;
 
         /// <summary>
         /// Tell a guest the host has paused, rather than leaving them in a world that has
@@ -747,6 +1063,34 @@ namespace Nightshare
         private void OnSessionFailed(string why)
         {
             LogError($"Session failed: {why}");
+            _lastSessionError = Readable(why);
+
+            // A SESSION CAN END WITHOUT ANYONE PRESSING LEAVE.
+            //
+            // The per-session state used to be cleared only in Leave(). A host that
+            // disconnects never goes through it, so _worldRequested stayed true, and the
+            // next join connected, said nothing, and never asked for the host's world. The
+            // guest sat in a stale copy of it looking like the transfer had worked.
+            ResetSessionState();
+        }
+
+        /// <summary>
+        /// Everything that must not outlive a session, however it ended.
+        /// </summary>
+        private void ResetSessionState()
+        {
+            // A session that ends mid-join must not leave the screen held for its timeout.
+            try { ReleaseLoadingScreen(); } catch (Exception) { }
+            _pendingArrival = null;
+
+            try { _clock.Reset(); } catch (Exception) { }
+            try { Replication.LoadPauseGuard.Forget(); } catch (Exception) { }
+            try { _avatars.Clear(); } catch (Exception) { }
+            try { _transforms.Reset(); } catch (Exception) { }
+            try { _zones.Reset(); } catch (Exception) { }
+
+            _worldRequested = false;
+            _worldReadyCheckTimer = 0f;
         }
 
         private void OnMessageReceived(PeerId from, NetReader reader)
@@ -762,15 +1106,11 @@ namespace Nightshare
             //
             // The handshake is handled inside the session itself, so dropping these costs
             // nothing: a clock or position message is superseded within a second anyway,
-            // and the snapshot is requested by this side only once the world is up.
-            if (!WorldIsLoaded)
-            {
-                if (reader.Type != MessageType.WorldSnapshotV1 &&
-                    reader.Type != MessageType.ManagerPacketV1)
-                {
-                    return;
-                }
-            }
+            // and the world is asked for by this side only once it has one.
+            //
+            // The snapshot messages used to be exempt here, because they were the one thing
+            // a client needed while its world was still coming up. Nothing is exempt now.
+            if (!WorldIsLoaded) return;
 
             switch (reader.Type)
             {
@@ -784,23 +1124,6 @@ namespace Nightshare
                     if (_session != null)
                         _transforms.Apply(_session, from, PlayerTransformV1.Parse(reader));
                     break;
-
-                case MessageType.WorldSnapshotRequestV1:
-                {
-                    if (_session == null || !_session.IsHost) break;
-
-                    var request = WorldSnapshotRequestV1.Parse(reader);
-                    Log($"World: {from.ToShortString()} is ready ({request.LocalManagerCount} manager(s)), sending");
-
-                    foreach (var p in _session.Peers)
-                    {
-                        if (p.Id != from) continue;
-                        try { SendWorldSnapshot(p); }
-                        catch (Exception ex) { LogError($"Could not send the world snapshot: {ex}"); }
-                        break;
-                    }
-                    break;
-                }
 
                 case MessageType.PlayerZoneV1:
                     if (_session != null && !_session.IsHost)
@@ -849,20 +1172,11 @@ namespace Nightshare
                         OnSaveRequested(from, SaveRequestV1.Parse(reader));
                     break;
 
-                case MessageType.SaveTransferV1:
+                case MessageType.SaveTransferV2:
                     if (_session != null && !_session.IsHost)
-                        OnSaveReceived(SaveTransferV1.Parse(reader));
+                        OnSaveReceived(SaveTransferV2.Parse(reader));
                     break;
 
-                case MessageType.WorldSnapshotV1:
-                    if (_session != null && !_session.IsHost)
-                        BeginReceivingSnapshot(WorldSnapshotV1.Parse(reader));
-                    break;
-
-                case MessageType.ManagerPacketV1:
-                    if (_session != null && !_session.IsHost)
-                        ReceiveSnapshotPacket(ManagerPacketV1.Parse(reader));
-                    break;
             }
         }
 

@@ -55,13 +55,24 @@ namespace Nightshare.Core.Transport
         {
             if (_running) throw new InvalidOperationException("Transport is already running.");
 
-            var (address, port) = ParseEndpoint(endpoint, IPAddress.Any);
+            // A HOST LISTENS EVERYWHERE. ONLY THE PORT IS TAKEN FROM THE ENDPOINT.
+            //
+            // The address half of the endpoint is where a GUEST connects to; for a host it
+            // would mean "which of my own network interfaces to listen on", which is not
+            // something anyone types into a join field on purpose. It used to be honoured,
+            // and an address of "7" parsed happily into 0.0.0.7, bound, and failed with
+            // "The requested address is not valid in its context" - which reached the player
+            // as the Host button doing nothing at all.
+            //
+            // Listening on every interface is also simply what a host wants: a guest may
+            // arrive over loopback, over the LAN, or over a VPN adapter.
+            var (_, port) = ParseEndpoint(endpoint, IPAddress.Any);
 
             IsHost = true;
             LocalPeer = PeerId.Host;
             _cts = new CancellationTokenSource();
 
-            _listener = new TcpListener(address, port);
+            _listener = new TcpListener(IPAddress.Any, port);
             _listener.Start();
             _running = true;
 

@@ -1,4 +1,5 @@
 using System;
+using HarmonyLib;
 using Nightshare.Core.Protocol;
 using Nightshare.Core.Session;
 using UnityEngine;
@@ -193,11 +194,26 @@ namespace Nightshare.Replication
                     //
                     // A LARGE step backwards is different: it means the host reloaded, and
                     // no amount of clock nudging fixes that.
+                    // AHEAD OF THE HOST IS NOT SOMETHING TO WAIT OUT.
+                    //
+                    // This used to log and return, on the reasoning that the game has no
+                    // rewind and a backwards step meant the host had reloaded. The effect
+                    // was a permanent desync: a guest that got ahead stayed ahead, because
+                    // every later correction was also backwards and also ignored. Observed
+                    // at 22 minutes apart and not closing.
+                    //
+                    // A guest gets ahead legitimately: leave a paused session and its clock
+                    // runs while the host's stays frozen. So past the tolerance, snap to the
+                    // host rather than drift forever.
                     if (-delta >= BackwardsJumpIsAReload)
                     {
-                        NightsharePlugin.Logger?.LogWarning(
-                            $"Host clock went backwards by {-delta}s (host {msg.TotalGameSeconds}, " +
-                            $"local {local}). Ignoring; this needs a world resync, not a clock nudge.");
+                        // Seconds come from the total rather than the message, which carries
+                        // only hours and minutes. Seconds within a minute is plain
+                        // arithmetic and cannot disagree with the game.
+                        ForceTo(msg.TotalGameSeconds,
+                                $"the host is {-delta}s behind this client",
+                                msg.GameplayGameDay, msg.ClockHour, msg.ClockMinute,
+                                ((msg.TotalGameSeconds % 60) + 60) % 60);
                     }
                     return;
                 }
@@ -222,6 +238,130 @@ namespace Nightshare.Replication
 
         /// <summary>The live manager, or null before the world is up.</summary>
         public Nivalis.TimeOfDayManager Manager => ResolveManager();
+
+        /// <summary>
+        /// Put the clock at an exact time, in either direction.
+        /// <para>
+        /// <c>AddTime</c> is the only public way to move the clock, and the game's own
+        /// <c>SetTime</c> is private, so an absolute set is a signed delta through the same
+        /// call. That keeps the day change, hour tick and minute tick firing through the
+        /// game's own code rather than forcing a value nothing has heard about.
+        /// </para>
+        /// <para>
+        /// <b>For jumps, not for drift.</b> Ordinary corrections stay one-directional; this
+        /// is for joining a session and for a client that has somehow got ahead.
+        /// </para>
+        /// </summary>
+        public void ForceTo(int totalGameSeconds, string why,
+                            int day = -1, int hour = 0, int minute = 0, int second = 0)
+        {
+            var manager = ResolveManager();
+            if (manager == null) return;
+
+            try
+            {
+                var local = Nivalis.TimeOfDayManager.TotalGameSeconds;
+                var delta = totalGameSeconds - local;
+                if (delta == 0) return;
+
+                // FORWARD IS A NUDGE, BACKWARD IS A SET.
+                //
+                // AddTime silently ignores a negative delta. It does not throw and does not
+                // clamp visibly; the clock simply does not move, and the log line claiming
+                // it moved was written by us. That shipped once and was only caught because
+                // the result is checked afterwards.
+                if (delta < 0 && day >= 0 && TrySetTimeDirectly(manager, day, hour, minute, second))
+                {
+                    // Done; SetTime does its own static refresh.
+                }
+                else
+                {
+                    manager.AddTime(delta);
+                }
+
+                manager.UpdateStaticVariables();
+
+                var now = Nivalis.TimeOfDayManager.TotalGameSeconds;
+                var line = $"Clock: snapped {delta:+#;-#;0}s to {Nivalis.TimeOfDayManager.ClockHour:00}:" +
+                           $"{Nivalis.TimeOfDayManager.ClockMinute:00} ({why})";
+
+                NightsharePlugin.Logger?.LogInfo(line);
+                NightshareLog.Write("INFO", line);
+
+                // AddTime taking a negative is assumed, not documented. Say so if the clock
+                // did not actually land where it was told to, rather than leaving a silent
+                // desync that looks like the sync working.
+                if (Math.Abs(now - totalGameSeconds) > 2)
+                {
+                    var missed = $"Clock: asked for {totalGameSeconds} but landed on {now}. " +
+                                 $"The clock did not take; this client stays out of step.";
+                    NightsharePlugin.Logger?.LogWarning(missed);
+                    NightshareLog.Write("WARNING", missed);
+                }
+            }
+            catch (Exception ex)
+            {
+                NightsharePlugin.Logger?.LogWarning($"Could not snap the clock: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Resolved once. Null means the lookup failed and the fallback is all there is.
+        /// </summary>
+        private static System.Reflection.MethodInfo _setTime;
+        private static bool _setTimeResolved;
+
+        /// <summary>
+        /// Move the clock to an exact time through the game's own <c>SetTime</c>.
+        /// <para>
+        /// <b>Private, so reached by reflection.</b> That is a cost worth paying here:
+        /// <c>AddTime</c> is the only public way to move the clock and it refuses to go
+        /// backwards, which leaves a client that has got ahead permanently out of step with
+        /// no supported way back. Il2CppInterop emits private game methods onto the wrapper
+        /// type, so they are reachable even though they are not callable directly.
+        /// </para>
+        /// <para>
+        /// Returns false if the method cannot be found or the call fails, and the caller
+        /// falls back to <c>AddTime</c>. A clock that refuses to move is bad; a mod that
+        /// throws inside a time update is worse.
+        /// </para>
+        /// </summary>
+        private static bool TrySetTimeDirectly(Nivalis.TimeOfDayManager manager,
+                                               int day, int hour, int minute, int second)
+        {
+            try
+            {
+                if (!_setTimeResolved)
+                {
+                    _setTimeResolved = true;
+                    _setTime = AccessTools.Method(typeof(Nivalis.TimeOfDayManager), "SetTime",
+                                                  new[] { typeof(Nivalis.SerializableTimeStamp) });
+
+                    if (_setTime == null)
+                        NightshareLog.Write("WARNING",
+                            "Clock: TimeOfDayManager.SetTime not found. The clock cannot be " +
+                            "moved backwards, so a client that gets ahead will stay ahead.");
+                }
+
+                if (_setTime == null) return false;
+
+                var stamp = new Nivalis.SerializableTimeStamp
+                {
+                    GameDay = day,
+                    Hour = hour,
+                    Minute = minute,
+                    Second = second,
+                };
+
+                _setTime.Invoke(manager, new object[] { stamp });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                NightshareLog.Write("WARNING", $"Clock: SetTime failed ({ex.Message}).");
+                return false;
+            }
+        }
 
         // ---------------------------------------------------------------- pause
 

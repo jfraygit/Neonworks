@@ -161,5 +161,15 @@ namespace Nightshare.UI
 
         /// <summary>A hairline of muted gold around the panel.</summary>
         public static readonly Color Border = new Color(0.478f, 0.388f, 0.212f, 0.70f);
+
+        /// <summary>
+        /// The band behind a selected menu row.
+        /// <para>
+        /// Faint on purpose. The selected row is already named by its gold text, so this
+        /// only has to say where the eye should rest; anything stronger competes with the
+        /// text it sits behind.
+        /// </para>
+        /// </summary>
+        public static readonly Color Highlight = new Color(0.910f, 0.706f, 0.310f, 0.14f);
     }
 }

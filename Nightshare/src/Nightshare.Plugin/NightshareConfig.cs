@@ -38,6 +38,7 @@ namespace Nightshare
         public ConfigEntry<string> Endpoint { get; }
         public ConfigEntry<string> PlayerName { get; }
 
+        public ConfigEntry<string> MenuKey { get; }
         public ConfigEntry<string> HostKey { get; }
         public ConfigEntry<string> JoinKey { get; }
         public ConfigEntry<string> LeaveKey { get; }
@@ -45,7 +46,6 @@ namespace Nightshare
         public ConfigEntry<string> ProbeKey { get; }
         public ConfigEntry<string> SaveTestKey { get; }
 
-        public ConfigEntry<bool> ApplyWorldSnapshot { get; }
         public ConfigEntry<float> WalkSpeed { get; }
         public ConfigEntry<float> SprintSpeed { get; }
         public ConfigEntry<bool> LogGaitChanges { get; }
@@ -79,7 +79,18 @@ namespace Nightshare
             //   F10, F11  Lumen's overlay and scene report.
             const string KeyHelp = "Key name from UnityEngine.InputSystem.Key, for example F9, F7, Backquote.";
 
-            HostKey = file.Bind("Hotkeys", "Host", "F9", $"Start hosting. {KeyHelp}");
+            // F9 was the direct Host key. The menu takes it over, because hosting is now
+            // something you choose in the menu and this is a key already known to be free
+            // of the game's own bindings, of Steam's and of Lumen's. Picking an untested
+            // key for the one hotkey players actually need would be a poor trade.
+            MenuKey = file.Bind("Hotkeys", "Menu", "F9",
+                "Open and close the Nightshare menu, where a session is hosted or joined. " +
+                "This is the only key most players need; the rest are testing shortcuts. " +
+                KeyHelp);
+
+            HostKey = file.Bind("Hotkeys", "Host", "",
+                "Testing shortcut: start hosting without opening the menu. Empty by " +
+                "default because the menu does this. " + KeyHelp);
             JoinKey = file.Bind("Hotkeys", "Join", "F7", $"Connect to Endpoint. {KeyHelp}");
             LeaveKey = file.Bind("Hotkeys", "Leave", "F6", $"Leave the current session. {KeyHelp}");
             StatusKey = file.Bind("Hotkeys", "Status", "F8", $"Log the session status. {KeyHelp}");
@@ -93,13 +104,11 @@ namespace Nightshare
                 "reports which one carries the facing. Turn your character while it runs. " +
                 KeyHelp);
 
-            ApplyWorldSnapshot = file.Bind("Session", "ApplyWorldSnapshot", false,
-                "EXPERIMENTAL, OFF BY DEFAULT. When joining, overwrite your local world " +
-                "with the host's: their city, NPCs, economy, shops and weather. This drives " +
-                "the game's own load path on an already running world, so a fault produces " +
-                "a broken city rather than a network error. BACK UP YOUR SAVE FIRST. " +
-                "With this off, a join still connects and replicates players and the clock; " +
-                "the world simply is not synchronised.");
+            // ApplyWorldSnapshot was here. It gated the old manager-by-manager world
+            // transfer, and by the end it gated nothing: a join sends the save file either
+            // way. It is removed rather than left defaulting to false, because a setting
+            // that no longer does anything is worse than no setting. It was still being
+            // read as an explanation for test results it had no part in.
 
             // Raised from a guessed 1.5 after a normal walk animated as a full run.
             // The avatar logs the speeds it observes; tune these against those numbers.

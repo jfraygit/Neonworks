@@ -94,5 +94,83 @@ namespace Nightshare
                 _writer = null;
             }
         }
+
+        // ------------------------------------------------------------ the game's own log
+
+        private static bool _mirroring;
+
+        /// <summary>
+        /// Capture plain Unity <c>Log</c> messages as well, not just problems. Off by
+        /// default because the game is chatty; turned on around a diagnostic that reports
+        /// through Unity rather than through us.
+        /// </summary>
+        public static bool CaptureEverything { get; set; }
+
+        /// <summary>
+        /// Mirror Unity's log into this process's own file.
+        /// <para>
+        /// <b>Why this is not optional.</b> BepInEx writes one <c>LogOutput.log</c> and only
+        /// the first process to start can hold it open, so the second instance's Unity
+        /// output is silently discarded. That instance is the guest, which is the one doing
+        /// everything interesting. It cost two separate diagnoses: the game's own
+        /// <c>OverrideableBool.LogOwners()</c> was called to name who was holding a pause,
+        /// printed perfectly, and went nowhere.
+        /// </para>
+        /// <para>
+        /// Warnings, errors, exceptions and asserts are always kept: they are rare and are
+        /// exactly what gets looked for afterwards. Ordinary messages need
+        /// <see cref="CaptureEverything"/>.
+        /// </para>
+        /// </summary>
+        public static void MirrorUnityLog()
+        {
+            if (_mirroring) return;
+
+            try
+            {
+                UnityEngine.Application.add_logMessageReceived(
+                    Il2CppInterop.Runtime.DelegateSupport.ConvertDelegate<UnityEngine.Application.LogCallback>(
+                        new Action<string, string, UnityEngine.LogType>(OnUnityLog)));
+
+                _mirroring = true;
+                Write("INFO", "Mirroring the game's log into this file");
+            }
+            catch (Exception ex)
+            {
+                // Losing the mirror is survivable; losing the mod is not.
+                NightsharePlugin.Logger?.LogWarning(
+                    $"Could not mirror the Unity log ({ex.GetType().Name}: {ex.Message}). " +
+                    $"Game-side messages will only appear in BepInEx's shared log.");
+            }
+        }
+
+        private static void OnUnityLog(string message, string stackTrace, UnityEngine.LogType type)
+        {
+            try
+            {
+                // WARNINGS ARE NOT KEPT BY DEFAULT, DELIBERATELY.
+                //
+                // This game logs its scene-loading timings at warning level, around a
+                // hundred lines per load. Keeping them made a single session's log 76 KB of
+                // "LoadAreaRoutine: 00:00:00.00" with the four lines that mattered buried in
+                // it, which defeats the point of having the log at all. Errors and
+                // exceptions are rare and are what gets looked for.
+                var important = type == UnityEngine.LogType.Error
+                             || type == UnityEngine.LogType.Exception
+                             || type == UnityEngine.LogType.Assert;
+
+                if (!important && !CaptureEverything) return;
+
+                Write($"unity:{type}", message);
+
+                // A stack trace is the whole value of an exception, and only of an exception.
+                if (type == UnityEngine.LogType.Exception && !string.IsNullOrEmpty(stackTrace))
+                    Write($"unity:{type}", "  " + stackTrace.Replace("\n", "\n  ").TrimEnd());
+            }
+            catch (Exception)
+            {
+                // Never let logging be the thing that breaks a session.
+            }
+        }
     }
 }

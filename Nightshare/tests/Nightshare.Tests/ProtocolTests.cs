@@ -69,46 +69,28 @@ namespace Nightshare.Tests
         }
 
         /// <summary>
-        /// Several of the game's own packet ids are not valid GUIDs. The protocol must
-        /// carry them as opaque strings or a join would throw on the host's own data.
+        /// A string field has to survive content that is not what its name suggests.
+        /// <para>
+        /// This replaces two tests on the retired <c>ManagerPacketV1</c>, which pinned that
+        /// the game's own packet ids are carried verbatim. Several of them are not valid
+        /// GUIDs at all (<c>Guid_PLAYER_MANAGER_SAVE</c>, <c>AI-Ai-ai</c>, and others with
+        /// non-hex characters), so anything that parsed one would throw on the host's own
+        /// data. No message carries a packet id today, but the next one to carry an id from
+        /// the game will meet the same thing.
+        /// </para>
         /// </summary>
         [Theory]
         [InlineData("Guid_PLAYER_MANAGER_SAVE")]
         [InlineData("AI-Ai-ai")]
         [InlineData("84F0A877-007I-7O50-B18E-56AF67D8B11B")]
         [InlineData("03H1F65F-148C-9E66-GHQE-4109P1286Q17")]
-        public void ManagerPacketCarriesNonGuidPacketIds(string packetGuid)
+        public void AnIdFromTheGameIsCarriedVerbatimEvenWhenItIsNotAGuid(string id)
         {
-            var payload = new byte[] { 1, 2, 3, 4 };
-            var sent = new ManagerPacketV1
-            {
-                PacketGuid = packetGuid,
-                ManagerTypeName = "Nivalis.TimeOfDayManager",
-                Payload = payload,
-            };
+            using var w = new NetWriter(MessageType.HelloV1);
+            w.Write(id);
 
-            using var r = new NetReader(sent.Serialise());
-            var got = ManagerPacketV1.Parse(r);
-
-            Assert.Equal(packetGuid, got.PacketGuid);
-            Assert.Equal(payload, got.Payload);
-        }
-
-        [Fact]
-        public void ManagerPacketCarriesASnapshotSizedPayload()
-        {
-            var payload = new byte[600 * 1024];
-            new Random(7).NextBytes(payload);
-
-            var sent = new ManagerPacketV1
-            {
-                PacketGuid = "1827C75C-5DF6-4ED6-A2A9-86B2A3048071",
-                ManagerTypeName = "Nivalis.GhostSystem.Ai.PersonDataManager",
-                Payload = payload,
-            };
-
-            using var r = new NetReader(sent.Serialise());
-            Assert.Equal(payload, ManagerPacketV1.Parse(r).Payload);
+            using var r = new NetReader(w.ToArray());
+            Assert.Equal(id, r.ReadString());
         }
 
         [Fact]

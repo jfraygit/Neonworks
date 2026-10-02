@@ -64,6 +64,10 @@ namespace Nightshare
                 NightshareLog.Open(ArtifactsDir, CommandLineOverrides.Mode?.ToString() ?? "game");
                 if (NightshareLog.Path != null)
                     Log.LogInfo($"  Log        : {NightshareLog.Path}");
+
+                // Capture the game's own output too, so a second instance's warnings and
+                // exceptions are not lost to the shared BepInEx log.
+                NightshareLog.MirrorUnityLog();
             }
             catch (Exception ex)
             {

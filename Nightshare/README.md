@@ -38,22 +38,36 @@ do it. One shared place that only moves when both are in it is the entire point.
 
 ## Where It Actually Is
 
-Honest status, since the above describes an intention and not a finished thing.
+Honest status, since the above describes an intention and not a finished thing. Six phases,
+two of them done.
 
 ![Phase 1: Foundations, complete](../docs/phase1.png)
 
-![Phase 2: Two Players, One City, in progress](../docs/phase2.png)
+![Phase 2: Two Players, One City, complete](../docs/phase2.png)
 
-### Phase 3 And Beyond
+### What Works Today
 
-**Shared crowds are the next big piece.** Right now each side simulates its own people, so
-you and your host do not see the same characters walking around. Everything you can
-interact with lives there too: shops, doors, transactions, and anything where two players
-touching the same thing has to resolve sensibly.
+Both players load their own save, press a key, and the host shows up in a list on the
+guest's screen by name. No addresses, no config files. Joining hands the guest the host's
+world and puts them next to the host, on the same clock, in the same room.
 
-After that comes the part the mod is actually for: **working at the host's businesses**,
-guest character customisation, and the systems that make visiting someone's city worth
-doing.
+From there you can see each other walking around, time runs once for both of you, and the
+day only turns when you have both gone to bed.
+
+### Phase 3, Next
+
+**Shared crowds are the next big piece.** Each side currently simulates its own people, so
+you and your host do not see the same characters in the street. Everything you can interact
+with lives there too: shops, doors, and anything where two people touching the same thing
+has to resolve sensibly.
+
+### Phases 4 To 6
+
+Your own character and the look of it; **working at the host's businesses**, which is the
+part the mod is actually for; then Steam invites and the polish that makes it releasable.
+
+Steam invites are deliberately last. Two copies of the game on one machine share a Steam
+account, so that path cannot be tested by one person, and everything else can.
 
 ## Building It
 

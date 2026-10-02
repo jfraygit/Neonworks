@@ -29,16 +29,30 @@ namespace Nightshare.Core.Protocol
         PongV1 = 7,
         DisconnectV1 = 8,
 
+        /// <summary>
+        /// A host announcing itself on the local network, over UDP rather than the session's
+        /// TCP connection. Sent to nobody in particular, so a guest can find a session
+        /// without being told an address.
+        /// </summary>
+        LobbyBeaconV1 = 9,
+
         // --- world state, 20 to 39 ---
-        WorldSnapshotRequestV1 = 20,
-        WorldSnapshotV1 = 21,
-        ManagerPacketV1 = 22,
+
+        // 20, 21 and 22 were WorldSnapshotRequestV1, WorldSnapshotV1 and ManagerPacketV1:
+        // the world sent as one message per manager, for a client to apply to its running
+        // game. Replaced by sending the save file itself. RETIRED, AND THE NUMBERS STAY
+        // SPENT. Reusing one means an old peer reads a new message into an old shape,
+        // passes every validity check, and acts on nonsense.
 
         /// <summary>A guest asking the host to save and send its world.</summary>
         SaveRequestV1 = 23,
 
-        /// <summary>The host's save file itself, for the guest to load.</summary>
+        /// <summary>Retired. Carried no arrival point, so a guest landed wherever the
+        /// game's zone arrival put them rather than beside the host.</summary>
         SaveTransferV1 = 24,
+
+        /// <summary>The host's save file, plus where the host is standing in it.</summary>
+        SaveTransferV2 = 25,
 
         // --- clock, 40 to 59 ---
         ClockSyncV1 = 40,

@@ -119,7 +119,12 @@ namespace Nightshare.Patches
 
                 // Every load reports where it put the player, and clears any pause left
                 // behind by the load once it settles.
-                try { NightshareCore.Instance.OnLoadStarted(); }
+                try
+                {
+                    var fromMenu = _nextLoadIsFromTheMenu;
+                    _nextLoadIsFromTheMenu = false;
+                    NightshareCore.Instance.OnLoadStarted(saveName, fromMenu);
+                }
                 catch (Exception) { }
             }
 
@@ -162,7 +167,23 @@ namespace Nightshare.Patches
             private static void Postfix(UnityEngine.SceneManagement.Scene scene,
                                         UnityEngine.SceneManagement.LoadSceneMode mode)
             {
-                try { Trace($"scene loaded: '{scene.name}' ({mode})"); }
+                try
+                {
+                    Trace($"scene loaded: '{scene.name}' ({mode})");
+
+                    // THE READINESS SIGNAL THE ARRIVAL WAITS ON.
+                    //
+                    // A city district loading additively is the point at which there is a
+                    // world to be placed in. The infrastructure scenes are not: '_Global'
+                    // is always there and 'Logo_Screen' is the menu, so neither means a
+                    // guest has somewhere to arrive.
+                    var name = scene.name ?? "";
+                    if (mode == UnityEngine.SceneManagement.LoadSceneMode.Additive
+                        && name != "_Global" && name != "Logo_Screen")
+                    {
+                        NightshareCore.Instance.OnGameplaySceneLoaded();
+                    }
+                }
                 catch (Exception) { }
             }
         }
@@ -182,14 +203,46 @@ namespace Nightshare.Patches
             }
         }
 
+        /// <summary>
+        /// Holds the loading screen up while a joining guest is still being placed.
+        /// <para>
+        /// Without this the screen drops the moment the world is loaded, showing two seconds
+        /// of the zone's arrival point followed by a teleport to the host. It works, and it
+        /// looks like it does not.
+        /// </para>
+        /// </summary>
         [HarmonyPatch(typeof(Nivalis.LoadingScreenUI), nameof(Nivalis.LoadingScreenUI.Hide))]
         private static class LoadingScreenHide
         {
+            private static bool _loggedHold;
+
+            /// <summary>Returning false skips the original, leaving the screen up.</summary>
             [HarmonyPrefix]
-            private static void Prefix()
+            private static bool Prefix()
             {
-                try { Trace("LoadingScreenUI.Hide()"); }
-                catch (Exception) { }
+                try
+                {
+                    if (NightshareCore.Instance.ShouldHoldLoadingScreen())
+                    {
+                        // Hide can be called repeatedly; say it once.
+                        if (!_loggedHold)
+                        {
+                            _loggedHold = true;
+                            Trace("LoadingScreenUI.Hide() HELD, the guest is not placed yet");
+                        }
+                        return false;
+                    }
+
+                    _loggedHold = false;
+                    Trace("LoadingScreenUI.Hide()");
+                }
+                catch (Exception)
+                {
+                    // A fault here must never be able to trap a player behind the screen.
+                    return true;
+                }
+
+                return true;
             }
         }
 
@@ -197,13 +250,24 @@ namespace Nightshare.Patches
         /// The game's own entry point, for the baseline run. A guest join should end up
         /// producing the same downstream trace as this does.
         /// </summary>
+        /// <summary>
+        /// Set by the load button, read and cleared by the next <c>Load</c>. This is what
+        /// lets an arrival line say whether it came from the game's own menu or from us,
+        /// which is the difference a control run exists to measure.
+        /// </summary>
+        private static bool _nextLoadIsFromTheMenu;
+
         [HarmonyPatch(typeof(Nivalis.LoadUI), "LoadRequest")]
         private static class LoadUiRequest
         {
             [HarmonyPrefix]
             private static void Prefix()
             {
-                try { Trace("LoadUI.LoadRequest()  <-- the game's own load button"); }
+                try
+                {
+                    _nextLoadIsFromTheMenu = true;
+                    Trace("LoadUI.LoadRequest()  <-- the game's own load button");
+                }
                 catch (Exception) { }
             }
         }

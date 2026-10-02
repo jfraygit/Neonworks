@@ -29,6 +29,7 @@ namespace Nightshare
         private UnityEngine.InputSystem.Key _statusKey;
         private UnityEngine.InputSystem.Key _probeKey;
         private UnityEngine.InputSystem.Key _saveTestKey;
+        private UnityEngine.InputSystem.Key _menuKey;
 
         private void Awake()
         {
@@ -39,6 +40,22 @@ namespace Nightshare
             _statusKey = ParseKey(config.StatusKey.Value, "status");
             _probeKey = ParseKey(config.ProbeKey.Value, "rig probe");
             _saveTestKey = ParseKey(config.SaveTestKey.Value, "save self test");
+            _menuKey = ParseKey(config.MenuKey.Value, "Nightshare menu");
+
+            // A NEW DEFAULT NEVER REACHES AN EXISTING CONFIG FILE.
+            //
+            // F9 used to be the direct Host shortcut and is now the menu. Anyone who has
+            // run a previous build still has Host = F9 written down, so both land on the
+            // same key. The menu wins, which is the right outcome, but silently ignoring a
+            // binding someone can see in their config is how a bug report starts.
+            if (_menuKey != UnityEngine.InputSystem.Key.None && _menuKey == _hostKey)
+            {
+                NightsharePlugin.Logger?.LogWarning(
+                    $"The Host shortcut and the Nightshare menu are both on " +
+                    $"{config.MenuKey.Value}. The menu wins. Hosting is in the menu now, so " +
+                    $"clear Hotkeys.Host in the config, or give it a different key.");
+                _hostKey = UnityEngine.InputSystem.Key.None;
+            }
 
             NightshareCore.Instance.Initialise();
         }
@@ -88,6 +105,20 @@ namespace Nightshare
             {
                 var keyboard = UnityEngine.InputSystem.Keyboard.current;
                 if (keyboard == null) return;      // no keyboard yet, or headless
+
+                // The menu key works whether the menu is open or shut; it is how you shut it.
+                if (WasPressed(keyboard, _menuKey))
+                {
+                    NightshareCore.Instance.ToggleLobbyMenu();
+                    return;
+                }
+
+                // EVERY OTHER HOTKEY STANDS DOWN WHILE THE MENU HAS THE KEYBOARD.
+                //
+                // The menu reads digits for the address and port. Without this, typing 7777
+                // would also be triggering whatever those keys are bound to, and the arrow
+                // keys would be moving the selection and the player at once.
+                if (NightshareCore.Instance.LobbyCapturesInput) return;
 
                 if (WasPressed(keyboard, _hostKey)) NightshareCore.Instance.StartHosting();
                 else if (WasPressed(keyboard, _joinKey)) NightshareCore.Instance.StartJoining();
