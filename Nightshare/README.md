@@ -54,12 +54,15 @@ world and puts them next to the host, on the same clock, in the same room.
 From there you can see each other walking around, time runs once for both of you, and the
 day only turns when you have both gone to bed.
 
-### Phase 3, Next
+![Phase 3: One Living City, in progress](../docs/phase3.png)
 
-**Shared crowds are the next big piece.** Each side currently simulates its own people, so
-you and your host do not see the same characters in the street. Everything you can interact
-with lives there too: shops, doors, and anything where two people touching the same thing
-has to resolve sensibly.
+**Shared crowds are the big one.** Each side currently simulates its own people, so you and
+your host do not see the same characters in the street. That is the clearest remaining sign
+that this is not yet one world rather than two that agree about the time.
+
+Everything you can interact with lives in this phase too, and shared money is the part with
+teeth: two people must never be able to spend the same money, which means the host has to
+settle every transaction rather than each side deducting its own.
 
 ### Phases 4 To 6
 
